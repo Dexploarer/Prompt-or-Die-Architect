@@ -1,0 +1,597 @@
+---
+alwaysApply: false
+description: Plugin system guide covering Actions, Providers, Evaluators, and Plugin architecture
+globs: **/packages/*/src/plugins/**,**/packages/core/src/types/plugin.ts,**/packages/core/src/types/components.ts
+---
+
+# ElizaOS Plugin System Guide
+
+## Plugin Architecture Overview
+
+Plugins are the primary mechanism for extending ElizaOS agent functionality. The plugin system is designed to be modular, type-safe, and composable, allowing developers to add new capabilities without modifying core code.
+
+### Plugin Interface
+
+Every plugin implements the `Plugin` interface:
+
+```typescript
+export interface Plugin {
+  name: string;
+  description: string;
+
+  // Initialization
+  init?: (config: Record<string, string>, runtime: IAgentRuntime) => Promise<void>;
+
+  // Configuration
+  config?: { [key: string]: any };
+  dependencies?: string[];
+  priority?: number;
+
+  // Components
+  actions?: Action[];
+  providers?: Provider[];
+  evaluators?: Evaluator[];
+  services?: (typeof Service)[];
+
+  // Advanced features
+  adapter?: IDatabaseAdapter;
+  models?: { [key: string]: (...args: any[]) => Promise<any> };
+  events?: PluginEvents;
+  routes?: Route[];
+  tests?: TestSuite[];
+}
+```
+
+### Plugin Lifecycle
+
+```mermaid
+graph TD
+    A[Plugin Created] --> B[runtime.registerPlugin()]
+    B --> C[Resolve Dependencies]
+    C --> D[Topological Sort]
+    D --> E[Call plugin.init()]
+    E --> F[Register Components]
+    F --> G[Plugin Ready]
+```
+
+## Actions: Agent Capabilities
+
+Actions define what an agent *can do* - they are the verbs in the agent's vocabulary.
+
+### Action Interface
+
+```typescript
+export interface Action {
+  name: string;
+  description: string;
+  examples?: ActionExample[][];
+
+  // Core logic
+  handler: Handler;
+  validate: Validator;
+}
+```
+
+### Creating Actions
+
+```typescript
+// ✅ DO: Create comprehensive actions with validation and examples
+const sendMessageAction: Action = {
+  name: 'SEND_MESSAGE',
+  description: 'Sends a message to a specified channel or user',
+
+  examples: [
+    [
+      { name: 'user', content: { text: 'Send a welcome message to the general channel' } },
+      { name: 'assistant', content: { text: 'I will send a welcome message now.', actions: ['SEND_MESSAGE'] } }
+    ]
+  ],
+
+  validate: async (runtime: IAgentRuntime, message: Memory): Promise<boolean> => {
+    // Fast validation - check if this action should handle the message
+    const text = message.content.text?.toLowerCase() || '';
+    return text.includes('send') && (text.includes('message') || text.includes('msg'));
+  },
+
+  handler: async (runtime: IAgentRuntime, message: Memory, state?: State): Promise<boolean> => {
+    try {
+      // Extract parameters from message
+      const target = extractTarget(message.content.text);
+      const content = extractContent(message.content.text);
+
+      // Use runtime services
+      const messagingService = runtime.getService<MessagingService>('messaging');
+      if (!messagingService) {
+        throw new Error('Messaging service not available');
+      }
+
+      // Perform the action
+      await messagingService.sendMessage(target, content);
+
+      // Create success memory
+      await runtime.createMemory({
+        agentId: runtime.agentId,
+        entityId: message.entityId,
+        roomId: message.roomId,
+        content: {
+          text: `Successfully sent message to ${target}`,
+          action: 'SEND_MESSAGE',
+          success: true
+        }
+      });
+
+      return true;
+    } catch (error) {
+      // Create error memory
+      await runtime.createMemory({
+        agentId: runtime.agentId,
+        entityId: message.entityId,
+        roomId: message.roomId,
+        content: {
+          text: `Failed to send message: ${error.message}`,
+          action: 'SEND_MESSAGE',
+          success: false,
+          error: error.message
+        }
+      });
+
+      return false;
+    }
+  }
+};
+```
+
+### Action Best Practices
+
+#### Validation Strategies
+
+```typescript
+// ✅ DO: Use specific, fast validation
+validate: async (runtime: IAgentRuntime, message: Memory): Promise<boolean> => {
+  const text = message.content.text?.toLowerCase() || '';
+
+  // Specific pattern matching
+  const sendPattern = /\b(send|post|publish)\b.*\b(message|msg|note)\b/i;
+  const hasTarget = /\b(to|in|channel|user)\b/i.test(text);
+
+  return sendPattern.test(text) && hasTarget;
+}
+
+// ❌ DON'T: Use slow or generic validation
+validate: async (runtime: IAgentRuntime, message: Memory): Promise<boolean> => {
+  // Too slow - makes API calls during validation
+  const response = await externalAPI.validate(message.content.text);
+  return response.isValid;
+}
+```
+
+#### Handler Patterns
+
+```typescript
+// ✅ DO: Structure handlers with clear error handling
+handler: async (runtime: IAgentRuntime, message: Memory, state?: State): Promise<boolean> => {
+  // 1. Extract and validate parameters
+  const params = extractParameters(message);
+  validateParameters(params);
+
+  // 2. Check required services
+  const requiredService = runtime.getService('required-service');
+  if (!requiredService) {
+    throw new Error('Required service not available');
+  }
+
+  // 3. Perform the action
+  const result = await performAction(params, requiredService);
+
+  // 4. Record the result
+  await recordActionResult(runtime, message, result);
+
+  return true;
+}
+
+// ✅ DO: Use ActionResult for complex responses
+handler: async (runtime: IAgentRuntime, message: Memory): Promise<ActionResult> => {
+  const result = await complexOperation(message);
+
+  return createActionResult({
+    text: 'Operation completed successfully',
+    data: { operationId: result.id, details: result.details },
+    values: { completedAt: Date.now() },
+    success: true
+  });
+}
+```
+
+## Providers: Agent Context
+
+Providers supply contextual information to help the agent make informed decisions.
+
+### Provider Interface
+
+```typescript
+export interface Provider {
+  name: string;
+  description?: string;
+  dynamic?: boolean;
+  position?: number;
+  private?: boolean;
+
+  get: (runtime: IAgentRuntime, message: Memory, state: State) => Promise<ProviderResult>;
+}
+
+export interface ProviderResult {
+  text?: string;
+  data?: { [key: string]: any };
+  values?: { [key: string]: any };
+}
+```
+
+### Creating Providers
+
+```typescript
+// ✅ DO: Create informative providers with structured data
+const timeProvider: Provider = {
+  name: 'currentTime',
+  description: 'Provides current date and time information',
+  dynamic: true, // Changes frequently
+  position: 1,   // Higher priority in context
+
+  get: async (runtime: IAgentRuntime, message: Memory, state: State): Promise<ProviderResult> => {
+    const now = new Date();
+
+    return {
+      text: `Current time: ${now.toLocaleString()}`,
+      data: {
+        iso: now.toISOString(),
+        timestamp: now.getTime(),
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
+      },
+      values: {
+        hour: now.getHours(),
+        minute: now.getMinutes(),
+        day: now.getDay(),
+        month: now.getMonth() + 1,
+        year: now.getFullYear()
+      }
+    };
+  }
+};
+
+// ✅ DO: Create private providers for sensitive data
+const userProfileProvider: Provider = {
+  name: 'userProfile',
+  description: 'Provides user profile information',
+  private: true, // Not included in regular context
+
+  get: async (runtime: IAgentRuntime, message: Memory, state: State): Promise<ProviderResult> => {
+    // Only accessible when explicitly requested
+    const user = await runtime.getEntityById(message.entityId);
+
+    return {
+      text: `User: ${user?.name || 'Unknown'}`,
+      data: { profile: user },
+      values: { userId: message.entityId }
+    };
+  }
+};
+```
+
+### Provider Best Practices
+
+#### Data Organization
+
+```typescript
+// ✅ DO: Structure provider data for different use cases
+get: async (runtime: IAgentRuntime, message: Memory, state: State): Promise<ProviderResult> => {
+  const data = await fetchContextData(message);
+
+  return {
+    // Human-readable text for the agent
+    text: formatForAgent(data),
+
+    // Structured data for programmatic access
+    data: {
+      raw: data,
+      metadata: extractMetadata(data),
+      relationships: findRelationships(data)
+    },
+
+    // Key-value pairs for quick lookups
+    values: {
+      status: data.status,
+      priority: data.priority,
+      owner: data.ownerId
+    }
+  };
+}
+```
+
+#### Performance Optimization
+
+```typescript
+// ✅ DO: Implement caching for expensive operations
+const weatherProvider: Provider = {
+  name: 'weather',
+  description: 'Provides current weather information',
+
+  get: async (runtime: IAgentRuntime, message: Memory, state: State): Promise<ProviderResult> => {
+    const cacheKey = `weather_${message.roomId}`;
+    const cached = state.weatherCache?.[cacheKey];
+
+    // Check if cache is still valid (5 minutes)
+    if (cached && Date.now() - cached.timestamp < 300000) {
+      return cached.data;
+    }
+
+    // Fetch fresh data
+    const weather = await fetchWeatherForLocation(message);
+
+    // Update state cache
+    if (!state.weatherCache) state.weatherCache = {};
+    state.weatherCache[cacheKey] = {
+      timestamp: Date.now(),
+      data: {
+        text: `Current weather: ${weather.condition}, ${weather.temperature}°F`,
+        data: { weather },
+        values: { temperature: weather.temperature, condition: weather.condition }
+      }
+    };
+
+    return state.weatherCache[cacheKey].data;
+  }
+};
+```
+
+## Evaluators: Agent Reflection
+
+Evaluators allow agents to assess and improve their own performance after interactions.
+
+### Evaluator Interface
+
+```typescript
+export interface Evaluator {
+  name: string;
+  description: string;
+  alwaysRun?: boolean;
+  examples?: EvaluationExample[];
+
+  handler: Handler;
+  validate: Validator;
+}
+```
+
+### Creating Evaluators
+
+```typescript
+// ✅ DO: Create evaluators that provide actionable feedback
+const responseQualityEvaluator: Evaluator = {
+  name: 'responseQuality',
+  description: 'Evaluates the quality of agent responses',
+  alwaysRun: true, // Run after every response
+
+  examples: [
+    {
+      prompt: 'Evaluate this response for clarity and helpfulness',
+      messages: [
+        { name: 'user', content: { text: 'How do I reset my password?' } },
+        { name: 'assistant', content: { text: 'Go to settings and click reset.' } }
+      ],
+      outcome: 'Response lacks detail and specificity'
+    }
+  ],
+
+  validate: async (runtime: IAgentRuntime, message: Memory): Promise<boolean> => {
+    // Only evaluate agent's own responses
+    return message.agentId === runtime.agentId;
+  },
+
+  handler: async (runtime: IAgentRuntime, message: Memory, state?: State): Promise<EvaluatorResult> => {
+    const response = message.content.text || '';
+    let score = 1.0; // Start with perfect score
+    const feedback: string[] = [];
+
+    // Evaluate response length
+    if (response.length < 10) {
+      score -= 0.3;
+      feedback.push('Response too short');
+    } else if (response.length > 1000) {
+      score -= 0.2;
+      feedback.push('Response too long');
+    }
+
+    // Evaluate helpfulness
+    const hasActionableInfo = /\b(click|go to|navigate|select|choose)\b/i.test(response);
+    if (!hasActionableInfo) {
+      score -= 0.2;
+      feedback.push('Missing actionable information');
+    }
+
+    // Evaluate clarity
+    const hasSpecificTerms = /\b(password|email|settings|account)\b/i.test(response);
+    if (!hasSpecificTerms) {
+      score -= 0.1;
+      feedback.push('Could be more specific');
+    }
+
+    // Store evaluation result
+    await runtime.createMemory({
+      agentId: runtime.agentId,
+      entityId: runtime.agentId, // Self-evaluation
+      roomId: message.roomId,
+      content: {
+        text: `Response quality: ${(score * 100).toFixed(0)}%`,
+        evaluation: {
+          score,
+          feedback,
+          responseLength: response.length,
+          evaluatedAt: Date.now()
+        }
+      }
+    });
+
+    return { score: Math.max(0, score), feedback };
+  }
+};
+```
+
+## Plugin Development Patterns
+
+### Basic Plugin Structure
+
+```typescript
+// ✅ DO: Structure plugins with clear separation of concerns
+const myPlugin: Plugin = {
+  name: 'my-feature-plugin',
+  description: 'Adds custom functionality to ElizaOS agents',
+
+  dependencies: ['@elizaos/plugin-bootstrap'],
+
+  init: async (config: Record<string, string>, runtime: IAgentRuntime): Promise<void> => {
+    // Plugin initialization
+    console.log(`Initializing ${this.name}`);
+
+    // Validate configuration
+    if (!config.apiKey) {
+      throw new Error('API key required for my-feature-plugin');
+    }
+
+    // Set up services or connections
+    await setupExternalService(config.apiKey);
+
+    console.log(`${this.name} initialized successfully`);
+  },
+
+  actions: [sendMessageAction, processDataAction],
+  providers: [timeProvider, userProfileProvider],
+  evaluators: [responseQualityEvaluator],
+  services: [ExternalAPIService],
+
+  config: {
+    apiKey: process.env.MY_PLUGIN_API_KEY,
+    timeout: 5000
+  }
+};
+```
+
+### Advanced Plugin Features
+
+#### Custom Routes
+
+```typescript
+// ✅ DO: Add HTTP routes for web interfaces
+const myPlugin: Plugin = {
+  // ... other properties
+
+  routes: [
+    {
+      type: 'GET',
+      path: '/my-plugin/dashboard',
+      name: 'Plugin Dashboard',
+      public: true,
+      handler: async (req, res, runtime) => {
+        const data = await getDashboardData(runtime);
+        res.json({ success: true, data });
+      }
+    },
+    {
+      type: 'POST',
+      path: '/my-plugin/action',
+      name: 'Execute Plugin Action',
+      handler: async (req, res, runtime) => {
+        const result = await executeAction(runtime, req.body);
+        res.json({ success: true, result });
+      }
+    }
+  ]
+};
+```
+
+#### Event Handling
+
+```typescript
+// ✅ DO: Handle runtime events
+const myPlugin: Plugin = {
+  // ... other properties
+
+  events: {
+    MESSAGE_RECEIVED: [
+      async (params: { message: Memory }) => {
+        console.log('Message received:', params.message.content.text);
+        // Custom message processing
+      }
+    ],
+    ACTION_COMPLETED: [
+      async (params: { actionName: string, result: ActionResult }) => {
+        // Log action completion
+        await logActionCompletion(params);
+      }
+    ]
+  }
+};
+```
+
+### Plugin Testing
+
+```typescript
+// ✅ DO: Create comprehensive plugin tests
+const myPluginTests: TestSuite = {
+  name: 'My Plugin Tests',
+
+  tests: {
+    'should initialize successfully': async (runtime: IAgentRuntime) => {
+      await runtime.registerPlugin(myPlugin);
+      expect(runtime.plugins.some(p => p.name === 'my-feature-plugin')).toBe(true);
+    },
+
+    'should register all actions': async (runtime: IAgentRuntime) => {
+      await runtime.registerPlugin(myPlugin);
+      const actionNames = runtime.actions.map(a => a.name);
+      expect(actionNames).toContain('SEND_MESSAGE');
+      expect(actionNames).toContain('PROCESS_DATA');
+    },
+
+    'should handle action execution': async (runtime: IAgentRuntime) => {
+      await runtime.registerPlugin(myPlugin);
+
+      const message = {
+        content: { text: 'send a message' },
+        entityId: 'test-user',
+        roomId: 'test-room'
+      };
+
+      const result = await runtime.processActions(message, [], {});
+      expect(result).toBe(true);
+    }
+  }
+};
+```
+
+## Best Practices Summary
+
+### Component Design
+
+1. **Single Responsibility**: Each component should have one clear purpose
+2. **Clear Interfaces**: Use descriptive names and comprehensive type definitions
+3. **Error Handling**: Implement proper error handling and logging
+4. **Documentation**: Include examples and detailed descriptions
+
+### Performance Optimization
+
+1. **Efficient Validation**: Keep validation logic fast and specific
+2. **Caching**: Implement caching for expensive operations
+3. **Resource Management**: Properly clean up resources and connections
+4. **Async Patterns**: Use appropriate async/await patterns throughout
+
+### Plugin Architecture
+
+1. **Dependency Management**: Clearly declare plugin dependencies
+2. **Configuration**: Provide sensible defaults and clear configuration options
+3. **Lifecycle**: Implement proper initialization and cleanup
+4. **Testing**: Include comprehensive tests for all components
+
+## References
+
+- [Plugin Interface](mdc:packages/core/src/types/plugin.ts)
+- [Component Interfaces](mdc:packages/core/src/types/components.ts)
+- [Action Examples](mdc:packages/core/src/actions.ts)
+- [Plugin Development Guide](mdc:packages/core/README.md)

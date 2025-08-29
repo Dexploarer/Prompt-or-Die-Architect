@@ -1,0 +1,559 @@
+---
+alwaysApply: false
+description: Agent configuration guide covering Character interface, validation, and agent setup patterns
+globs: **/packages/core/src/types/agent.ts,**/packages/core/src/schemas/character.ts,**/characters/**,**/src/agents/**
+---
+
+# ElizaOS Agent Configuration Guide
+
+## Character Interface Overview
+
+The `Character` interface is the foundation of every ElizaOS agent, defining its personality, capabilities, and behavior. It provides a structured way to configure how an agent interacts with users and processes information.
+
+### Core Character Structure
+
+```typescript
+export interface Character {
+  // Identity
+  id?: UUID;
+  name: string;
+  username?: string;
+
+  // Core Personality
+  bio: string | string[];
+  system?: string;
+
+  // Communication Patterns
+  messageExamples?: MessageExample[][];
+  postExamples?: string[];
+
+  // Knowledge & Context
+  topics?: string[];
+  adjectives?: string[];
+  knowledge?: KnowledgeItem[];
+  style?: StyleConfig;
+
+  // Configuration
+  plugins?: string[];
+  settings?: Record<string, any>;
+  secrets?: Record<string, any>;
+
+  // Templates (advanced)
+  templates?: Record<string, TemplateType>;
+}
+```
+
+## Character Validation
+
+ElizaOS provides comprehensive validation for character configurations:
+
+### Zod Schema Validation
+
+```typescript
+// ✅ DO: Use schema validation for character configuration
+import { validateCharacter, characterSchema } from '@elizaos/core';
+
+const character = {
+  name: 'Assistant',
+  bio: 'A helpful AI assistant',
+  plugins: ['@elizaos/plugin-sql'],
+  settings: {
+    model: 'gpt-4',
+    temperature: 0.7
+  }
+};
+
+const validation = validateCharacter(character);
+if (validation.success) {
+  console.log('Character is valid:', validation.data);
+} else {
+  console.error('Validation failed:', validation.error);
+}
+```
+
+### Required vs Optional Fields
+
+```typescript
+// ✅ DO: Provide required fields
+const validCharacter: Character = {
+  name: 'MyAgent',                    // Required
+  bio: 'An AI assistant',            // Required
+  plugins: ['@elizaos/plugin-sql'],  // Optional but recommended
+  settings: {                        // Optional
+    model: 'gpt-4'
+  }
+};
+
+// ❌ DON'T: Missing required fields
+const invalidCharacter = {
+  username: 'myagent',               // Missing name and bio
+  plugins: []
+};
+```
+
+## Message Examples and Training
+
+### Message Example Structure
+
+```typescript
+export interface MessageExample {
+  name: string;
+  content: Content;
+}
+```
+
+### Creating Effective Examples
+
+```typescript
+// ✅ DO: Create diverse, realistic examples
+const characterWithExamples: Character = {
+  name: 'CustomerSupport',
+  bio: 'A helpful customer support agent',
+  messageExamples: [
+    [
+      {
+        name: 'user',
+        content: {
+          text: 'My order hasn\'t arrived yet. Can you help?'
+        }
+      },
+      {
+        name: 'CustomerSupport',
+        content: {
+          text: 'I\'d be happy to help you track your order. Could you please provide your order number?',
+          actions: ['CHECK_ORDER_STATUS']
+        }
+      }
+    ],
+    [
+      {
+        name: 'user',
+        content: {
+          text: 'I need to return an item'
+        }
+      },
+      {
+        name: 'CustomerSupport',
+        content: {
+          text: 'I can assist you with returns. Please provide your order number and tell me what item you\'d like to return.',
+          actions: ['INITIATE_RETURN']
+        }
+      }
+    ]
+  ]
+};
+```
+
+### Best Practices for Examples
+
+1. **Diversity**: Include examples for different scenarios and user types
+2. **Realism**: Use natural, conversational language
+3. **Completeness**: Show both user input and agent response
+4. **Actions**: Include relevant actions in responses
+5. **Edge Cases**: Cover common edge cases and error scenarios
+
+## Personality Configuration
+
+### Bio and System Prompt
+
+```typescript
+// ✅ DO: Create detailed, specific bios
+const specializedAgent: Character = {
+  name: 'CodeReviewBot',
+  bio: [
+    'An expert code review assistant with 10+ years of software development experience.',
+    'Specializes in identifying bugs, security vulnerabilities, and code quality issues.',
+    'Provides constructive feedback and actionable suggestions for improvement.',
+    'Focuses on maintainability, performance, and best practices.'
+  ],
+  system: 'You are an expert code reviewer. Focus on identifying issues, suggesting improvements, and teaching best practices. Always be constructive and provide specific, actionable feedback.'
+};
+
+// ✅ DO: Use system prompt for behavioral guidance
+const creativeAssistant: Character = {
+  name: 'CreativeWriter',
+  bio: 'A creative writing assistant that helps with stories, poems, and creative content',
+  system: 'You are a creative writing assistant. Be imaginative, encouraging, and help users develop their creative ideas. Ask probing questions to understand their vision better.'
+};
+```
+
+### Topics and Adjectives
+
+```typescript
+// ✅ DO: Define clear areas of expertise
+const technicalAgent: Character = {
+  name: 'TechSupport',
+  bio: 'Technical support specialist',
+  topics: [
+    'software installation',
+    'troubleshooting',
+    'hardware setup',
+    'network configuration',
+    'security best practices'
+  ],
+  adjectives: [
+    'patient',
+    'thorough',
+    'helpful',
+    'knowledgeable',
+    'methodical'
+  ]
+};
+```
+
+### Style Configuration
+
+```typescript
+// ✅ DO: Configure communication style
+const professionalAgent: Character = {
+  name: 'BusinessAdvisor',
+  bio: 'Professional business advisor',
+  style: {
+    all: [
+      'Use professional language',
+      'Be concise but thorough',
+      'Provide evidence for recommendations'
+    ],
+    chat: [
+      'Use friendly but professional tone',
+      'Ask clarifying questions when needed'
+    ],
+    post: [
+      'Use formal business writing',
+      'Include executive summaries'
+    ]
+  }
+};
+```
+
+## Knowledge and Context
+
+### Knowledge Base Configuration
+
+```typescript
+// ✅ DO: Configure knowledge sources
+const knowledgeableAgent: Character = {
+  name: 'ResearchAssistant',
+  bio: 'Research assistant with access to specialized knowledge',
+  knowledge: [
+    // File paths
+    'knowledge/research-methodology.md',
+    'knowledge/academic-papers/',
+
+    // Shared knowledge
+    {
+      path: 'knowledge/shared-facts.json',
+      shared: true
+    },
+
+    // Directory with sharing
+    {
+      directory: 'knowledge/domain-expertise/',
+      shared: true
+    }
+  ]
+};
+```
+
+### Template System
+
+```typescript
+// ✅ DO: Use templates for dynamic content
+const templateBasedAgent: Character = {
+  name: 'ReportGenerator',
+  bio: 'Automated report generation assistant',
+  templates: {
+    dailyReport: '## Daily Report - {{date}}\n\n### Summary\n{{summary}}\n\n### Key Metrics\n{{metrics}}\n\n### Action Items\n{{actions}}',
+
+    emailResponse: ({ state }) => {
+      const urgency = state.values.urgency || 'normal';
+      const prefix = urgency === 'high' ? 'URGENT: ' : '';
+      return `${prefix}Response to: ${state.values.subject}`;
+    }
+  }
+};
+```
+
+## Plugin Configuration
+
+### Core Plugins
+
+```typescript
+// ✅ DO: Include essential plugins
+const basicAgent: Character = {
+  name: 'BasicAssistant',
+  bio: 'A basic AI assistant',
+  plugins: [
+    '@elizaos/plugin-bootstrap',    // Essential functionality
+    '@elizaos/plugin-sql',          // Database support
+    '@elizaos/plugin-openai'        // LLM provider
+  ]
+};
+```
+
+### Specialized Plugins
+
+```typescript
+// ✅ DO: Add specialized plugins for specific capabilities
+const socialMediaAgent: Character = {
+  name: 'SocialManager',
+  bio: 'Social media management assistant',
+  plugins: [
+    '@elizaos/plugin-bootstrap',
+    '@elizaos/plugin-sql',
+    '@elizaos/plugin-twitter',      // Twitter integration
+    '@elizaos/plugin-discord',      // Discord integration
+    '@elizaos/plugin-image',        // Image generation
+    '@elizaos/plugin-scheduler'     // Task scheduling
+  ]
+};
+```
+
+## Settings and Secrets
+
+### Model Configuration
+
+```typescript
+// ✅ DO: Configure model settings appropriately
+const configuredAgent: Character = {
+  name: 'AdvancedAssistant',
+  bio: 'Advanced AI assistant with custom model settings',
+  settings: {
+    model: 'gpt-4-turbo-preview',
+    temperature: 0.7,
+    maxTokens: 2000,
+    frequencyPenalty: 0.1,
+    presencePenalty: 0.1,
+
+    // Plugin-specific settings
+    twitter: {
+      maxTweetsPerHour: 50,
+      enableReplies: true
+    },
+
+    database: {
+      connectionPoolSize: 10,
+      enableCaching: true
+    }
+  }
+};
+```
+
+### Secrets Management
+
+```typescript
+// ✅ DO: Handle secrets securely (never in code)
+const secureAgent: Character = {
+  name: 'SecureAgent',
+  bio: 'Agent with secure API access',
+  secrets: {
+    // These will be loaded from environment variables
+    // or secure secret stores at runtime
+    OPENAI_API_KEY: process.env.OPENAI_API_KEY,
+    DATABASE_URL: process.env.DATABASE_URL,
+    TWITTER_API_KEY: process.env.TWITTER_API_KEY
+  }
+};
+```
+
+## Advanced Configuration Patterns
+
+### Multi-Personality Agents
+
+```typescript
+// ✅ DO: Create agents with multiple personas
+const multiPersonaAgent: Character = {
+  name: 'UniversalAssistant',
+  bio: 'A versatile assistant that can adapt to different contexts',
+  messageExamples: [
+    // Professional context
+    [
+      { name: 'user', content: { text: 'Schedule a meeting with the team' } },
+      { name: 'UniversalAssistant', content: {
+        text: 'I\'ll help you schedule that meeting. What date and time works best?',
+        actions: ['SCHEDULE_MEETING']
+      }}
+    ],
+    // Casual context
+    [
+      { name: 'user', content: { text: 'What\'s the weather like?' } },
+      { name: 'UniversalAssistant', content: {
+        text: 'I\'d be happy to check the weather for you. Could you tell me your location?',
+        actions: ['GET_WEATHER']
+      }}
+    ]
+  ],
+  style: {
+    all: ['Adapt communication style to context', 'Be helpful and responsive'],
+    chat: ['Use conversational language', 'Show personality'],
+    post: ['Use professional language', 'Be concise']
+  }
+};
+```
+
+### Context-Aware Agents
+
+```typescript
+// ✅ DO: Create context-aware agents
+const contextAwareAgent: Character = {
+  name: 'ContextAssistant',
+  bio: 'An assistant that adapts based on user context and preferences',
+  knowledge: [
+    'user-preferences.json',
+    'conversation-history/',
+    'context-rules.md'
+  ],
+  settings: {
+    enableContextAwareness: true,
+    rememberUserPreferences: true,
+    adaptCommunicationStyle: true,
+    contextWindowSize: 20
+  }
+};
+```
+
+### Template-Based Agents
+
+```typescript
+// ✅ DO: Use templates for structured outputs
+const structuredAgent: Character = {
+  name: 'ReportWriter',
+  bio: 'Specialized in creating structured reports and documentation',
+  templates: {
+    bugReport: `## Bug Report
+
+**Title:** {{title}}
+**Severity:** {{severity}}
+**Description:** {{description}}
+
+### Steps to Reproduce
+{{steps}}
+
+### Expected Behavior
+{{expected}}
+
+### Actual Behavior
+{{actual}}
+
+### Environment
+- OS: {{os}}
+- Browser: {{browser}}
+- Version: {{version}}`,
+
+    featureRequest: `## Feature Request
+
+**Title:** {{title}}
+**Priority:** {{priority}}
+**Description:** {{description}}
+
+### Use Case
+{{useCase}}
+
+### Proposed Solution
+{{solution}}
+
+### Alternatives Considered
+{{alternatives}}`
+  }
+};
+```
+
+## Validation and Testing
+
+### Character Validation
+
+```typescript
+// ✅ DO: Validate characters before deployment
+import { validateCharacter } from '@elizaos/core';
+
+function validateAndDeployCharacter(character: any) {
+  const validation = validateCharacter(character);
+
+  if (!validation.success) {
+    console.error('Character validation failed:');
+    validation.error?.issues?.forEach(issue => {
+      console.error(`- ${issue.path.join('.')}: ${issue.message}`);
+    });
+    return false;
+  }
+
+  // Deploy validated character
+  return deployCharacter(validation.data);
+}
+```
+
+### Configuration Testing
+
+```typescript
+// ✅ DO: Test character configurations
+describe('Character Configuration', () => {
+  it('should validate basic character structure', () => {
+    const character = {
+      name: 'TestAgent',
+      bio: 'A test agent',
+      plugins: ['@elizaos/plugin-sql']
+    };
+
+    const validation = validateCharacter(character);
+    expect(validation.success).toBe(true);
+  });
+
+  it('should reject invalid characters', () => {
+    const invalidCharacter = {
+      username: 'test',  // Missing required name
+      plugins: []
+    };
+
+    const validation = validateCharacter(invalidCharacter);
+    expect(validation.success).toBe(false);
+  });
+
+  it('should validate message examples', () => {
+    const characterWithExamples = {
+      name: 'ExampleAgent',
+      bio: 'Agent with examples',
+      messageExamples: [
+        [
+          { name: 'user', content: { text: 'Hello' } },
+          { name: 'ExampleAgent', content: { text: 'Hi there!' } }
+        ]
+      ]
+    };
+
+    const validation = validateCharacter(characterWithExamples);
+    expect(validation.success).toBe(true);
+  });
+});
+```
+
+## Best Practices
+
+### Configuration Management
+
+1. **Version Control**: Keep character configurations in version control
+2. **Environment Specific**: Use different settings for development, staging, and production
+3. **Documentation**: Document the purpose and configuration of each character
+4. **Validation**: Always validate character configurations before deployment
+5. **Testing**: Test character configurations with realistic scenarios
+
+### Personality Design
+
+1. **Consistency**: Maintain consistent personality across all interactions
+2. **Clarity**: Make the agent's role and capabilities clear
+3. **Flexibility**: Design agents that can handle a variety of scenarios
+4. **Boundaries**: Define clear boundaries for what the agent can and cannot do
+5. **Evolution**: Plan for how the agent's personality might evolve over time
+
+### Performance Optimization
+
+1. **Minimal Examples**: Only include examples that are truly necessary
+2. **Efficient Knowledge**: Structure knowledge bases for quick access
+3. **Caching**: Use appropriate caching for frequently accessed data
+4. **Lazy Loading**: Load knowledge and resources on-demand when possible
+
+## References
+
+- [Character Interface](mdc:packages/core/src/types/agent.ts)
+- [Character Schema](mdc:packages/core/src/schemas/character.ts)
+- [Character Examples](mdc:packages/core/src/types/agent.ts)
+- [Validation Utilities](mdc:packages/core/src/schemas/character.ts)

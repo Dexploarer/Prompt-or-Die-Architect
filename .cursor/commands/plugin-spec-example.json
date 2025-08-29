@@ -1,0 +1,150 @@
+{
+  "name": "advanced-analytics",
+  "version": "1.0.0",
+  "description": "Advanced analytics and monitoring for ElizaOS agents with real-time metrics, anomaly detection, and performance insights",
+  "author": "ElizaOS Team",
+  "license": "MIT",
+  
+  "features": [
+    "Real-time metrics collection",
+    "Anomaly detection",
+    "Performance monitoring",
+    "Memory usage tracking",
+    "API latency monitoring",
+    "Custom event tracking",
+    "Dashboard integration"
+  ],
+  
+  "tags": ["analytics", "monitoring", "metrics", "performance"],
+  
+  "actions": [
+    {
+      "name": "recordMetric",
+      "description": "Record a custom metric with metadata",
+      "parameters": [
+        { "name": "name", "type": "string", "required": true },
+        { "name": "value", "type": "number", "required": true },
+        { "name": "tags", "type": "object", "required": false }
+      ],
+      "returns": "MetricRecord"
+    },
+    {
+      "name": "queryMetrics",
+      "description": "Query metrics with filters",
+      "parameters": [
+        { "name": "filters", "type": "object", "required": false },
+        { "name": "timeRange", "type": "object", "required": false }
+      ],
+      "returns": "MetricResult[]"
+    },
+    {
+      "name": "detectAnomalies",
+      "description": "Detect anomalies in metric patterns",
+      "parameters": [
+        { "name": "metricName", "type": "string", "required": true },
+        { "name": "sensitivity", "type": "number", "required": false }
+      ],
+      "returns": "AnomalyReport"
+    }
+  ],
+  
+  "providers": [
+    {
+      "name": "systemMetricsProvider",
+      "description": "Provides system-level metrics",
+      "refreshInterval": 60000,
+      "cacheStrategy": "memory",
+      "dataFormat": "structured"
+    },
+    {
+      "name": "performanceProvider",
+      "description": "Provides performance metrics",
+      "refreshInterval": 30000,
+      "cacheStrategy": "memory",
+      "dataFormat": "json"
+    }
+  ],
+  
+  "evaluators": [
+    {
+      "name": "performanceEvaluator",
+      "description": "Evaluates agent performance",
+      "metrics": ["response_time", "success_rate", "error_rate"]
+    },
+    {
+      "name": "anomalyEvaluator",
+      "description": "Evaluates metric anomalies",
+      "threshold": 2.5
+    }
+  ],
+  
+  "services": [
+    {
+      "name": "MetricsCollectorService",
+      "description": "Collects and aggregates metrics",
+      "singleton": true,
+      "lifecycle": "eager",
+      "dependencies": []
+    },
+    {
+      "name": "AnomalyDetectionService",
+      "description": "Detects anomalies using statistical methods",
+      "singleton": true,
+      "lifecycle": "lazy",
+      "dependencies": ["MetricsCollectorService"]
+    }
+  ],
+  
+  "config": {
+    "required": [
+      {
+        "name": "METRICS_ENABLED",
+        "type": "boolean",
+        "description": "Enable metrics collection",
+        "default": true
+      }
+    ],
+    "optional": [
+      {
+        "name": "METRICS_RETENTION_DAYS",
+        "type": "number",
+        "description": "Days to retain metrics",
+        "default": 30
+      },
+      {
+        "name": "ANOMALY_SENSITIVITY",
+        "type": "number",
+        "description": "Anomaly detection sensitivity (1-10)",
+        "default": 5,
+        "validation": "min:1,max:10"
+      }
+    ]
+  },
+  
+  "testing": {
+    "coverage": {
+      "statements": 85,
+      "branches": 80,
+      "functions": 85,
+      "lines": 85
+    },
+    "e2e": true,
+    "performance": true
+  },
+  
+  "advanced": {
+    "useDatabase": false,
+    "useWebSocket": true,
+    "useAuthentication": false,
+    "rateLimit": {
+      "enabled": true,
+      "requests": 100,
+      "window": 60000
+    },
+    "caching": {
+      "strategy": "lru",
+      "maxSize": 1000,
+      "ttl": 300000
+    }
+  }
+}

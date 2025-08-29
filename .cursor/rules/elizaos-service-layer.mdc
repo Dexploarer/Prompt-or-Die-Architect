@@ -1,0 +1,625 @@
+---
+alwaysApply: false
+description: Service layer guide covering Service interface, ServiceBuilder, and service lifecycle management
+globs: **/packages/core/src/types/service.ts,**/packages/core/src/services.ts,**/packages/*/src/services/**
+---
+
+# ElizaOS Service Layer Guide
+
+## Service Architecture Overview
+
+Services in ElizaOS provide long-running, stateful functionality that supports the agent's operations. They handle connections to external systems, manage resources, and provide specialized capabilities that components can use.
+
+### Core Service Concepts
+
+```mermaid
+graph TD
+    A[Service Registry] --> B[Service Types]
+    B --> C[Service Instances]
+    C --> D[Service Lifecycle]
+    D --> E[Resource Management]
+
+    F[IAgentRuntime] --> G[getService()]
+    G --> H[Service Discovery]
+    H --> I[Type-safe Access]
+
+    J[Plugin System] --> K[Service Registration]
+    K --> L[Dependency Resolution]
+    L --> M[Lifecycle Management]
+```
+
+### Service Interface
+
+Every service extends the base `Service` abstract class:
+
+```typescript
+export abstract class Service {
+  /** Runtime instance */
+  protected runtime!: IAgentRuntime;
+
+  constructor(runtime?: IAgentRuntime) {
+    if (runtime) {
+      this.runtime = runtime;
+    }
+  }
+
+  /** Service type identifier */
+  static serviceType: string;
+
+  /** Human-readable description */
+  abstract capabilityDescription: string;
+
+  /** Service configuration */
+  config?: Metadata;
+
+  /** Start service connection */
+  static async start(_runtime: IAgentRuntime): Promise<Service> {
+    throw new Error('Not implemented');
+  }
+
+  /** Stop service connection */
+  abstract stop(): Promise<void>;
+}
+```
+
+## Service Type System
+
+ElizaOS uses a type-safe service registry system that can be extended by plugins:
+
+### Core Service Types
+
+```typescript
+export const ServiceType = {
+  TRANSCRIPTION: 'transcription',
+  VIDEO: 'video',
+  BROWSER: 'browser',
+  PDF: 'pdf',
+  REMOTE_FILES: 'aws_s3',
+  WEB_SEARCH: 'web_search',
+  EMAIL: 'email',
+  TEE: 'tee',
+  TASK: 'task',
+  WALLET: 'wallet',
+  LP_POOL: 'lp_pool',
+  TOKEN_DATA: 'token_data',
+  MESSAGE: 'message',
+  POST: 'post',
+  UNKNOWN: 'unknown',
+} as const satisfies ServiceTypeRegistry;
+```
+
+### Type-safe Service Access
+
+```typescript
+// ✅ DO: Use type-safe service access
+const transcriptionService = runtime.getService<TranscriptionService>(
+  ServiceType.TRANSCRIPTION
+);
+
+// ✅ DO: Check service availability
+if (runtime.hasService(ServiceType.WEB_SEARCH)) {
+  const searchService = runtime.getService<WebSearchService>(
+    ServiceType.WEB_SEARCH
+  );
+  // Use service...
+}
+
+// ✅ DO: Get multiple services of the same type
+const videoServices = runtime.getServicesByType<VideoService>(
+  ServiceType.VIDEO
+);
+```
+
+## Creating Services
+
+### Basic Service Implementation
+
+```typescript
+// ✅ DO: Implement services with proper lifecycle management
+class DatabaseService extends Service {
+  static serviceType = ServiceType.UNKNOWN; // Use appropriate type
+  capabilityDescription = 'Provides database connectivity and operations';
+
+  private connection?: DatabaseConnection;
+
+  static async start(runtime: IAgentRuntime): Promise<DatabaseService> {
+    const service = new DatabaseService(runtime);
+
+    // Initialize connection
+    service.connection = await createDatabaseConnection(
+      runtime.getSetting('DATABASE_URL')
+    );
+
+    // Test connection
+    await service.connection.ping();
+
+    runtime.logger.info('Database service started successfully');
+    return service;
+  }
+
+  async stop(): Promise<void> {
+    if (this.connection) {
+      await this.connection.close();
+      this.connection = undefined;
+      this.runtime.logger.info('Database service stopped');
+    }
+  }
+
+  // Service-specific methods
+  async query(sql: string, params?: any[]): Promise<QueryResult> {
+    if (!this.connection) {
+      throw new Error('Database service not connected');
+    }
+
+    try {
+      return await this.connection.query(sql, params);
+    } catch (error) {
+      this.runtime.logger.error('Database query failed:', error);
+      throw createServiceError(error, 'DATABASE_QUERY_ERROR');
+    }
+  }
+}
+```
+
+### Service Builder Pattern
+
+Use the `ServiceBuilder` for type-safe service creation:
+
+```typescript
+// ✅ DO: Use ServiceBuilder for complex service setup
+const emailService = createService<EmailService>('email')
+  .withDescription('Handles email sending and receiving')
+  .withStart(async (runtime: IAgentRuntime) => {
+    const service = new EmailService(runtime);
+
+    // Configure SMTP connection
+    const smtpConfig = {
+      host: runtime.getSetting('SMTP_HOST'),
+      port: parseInt(runtime.getSetting('SMTP_PORT') || '587'),
+      secure: false,
+      auth: {
+        user: runtime.getSetting('SMTP_USER'),
+        pass: runtime.getSetting('SMTP_PASS'),
+      },
+    };
+
+    service.configureSMTP(smtpConfig);
+    await service.connect();
+
+    return service;
+  })
+  .withStop(async () => {
+    await service.disconnect();
+  })
+  .build();
+
+// Usage in plugin
+const emailServiceClass = emailService;
+```
+
+### Advanced Service Patterns
+
+#### Connection Pooling Service
+
+```typescript
+// ✅ DO: Implement connection pooling for resource management
+class ConnectionPoolService extends Service {
+  static serviceType = 'connection_pool';
+  capabilityDescription = 'Manages database connection pool';
+
+  private pool: ConnectionPool;
+
+  static async start(runtime: IAgentRuntime): Promise<ConnectionPoolService> {
+    const service = new ConnectionPoolService(runtime);
+
+    // Configure pool
+    const poolConfig = {
+      min: parseInt(runtime.getSetting('DB_POOL_MIN') || '2'),
+      max: parseInt(runtime.getSetting('DB_POOL_MAX') || '10'),
+      idleTimeoutMillis: 30000,
+      acquireTimeoutMillis: 60000,
+    };
+
+    service.pool = new ConnectionPool(
+      runtime.getSetting('DATABASE_URL'),
+      poolConfig
+    );
+
+    // Health check
+    await service.healthCheck();
+
+    return service;
+  }
+
+  async stop(): Promise<void> {
+    if (this.pool) {
+      await this.pool.close();
+      this.runtime.logger.info('Connection pool closed');
+    }
+  }
+
+  async getConnection(): Promise<Connection> {
+    return await this.pool.getConnection();
+  }
+
+  async healthCheck(): Promise<boolean> {
+    try {
+      const connection = await this.getConnection();
+      await connection.ping();
+      connection.release();
+      return true;
+    } catch (error) {
+      this.runtime.logger.error('Pool health check failed:', error);
+      return false;
+    }
+  }
+}
+```
+
+#### Background Processing Service
+
+```typescript
+// ✅ DO: Implement services for background tasks
+class BackgroundTaskService extends Service {
+  static serviceType = 'background_tasks';
+  capabilityDescription = 'Handles asynchronous task processing';
+
+  private queue: TaskQueue;
+  private workers: Worker[] = [];
+  private isProcessing = false;
+
+  static async start(runtime: IAgentRuntime): Promise<BackgroundTaskService> {
+    const service = new BackgroundTaskService(runtime);
+
+    // Initialize queue
+    service.queue = new TaskQueue({
+      concurrency: parseInt(runtime.getSetting('TASK_CONCURRENCY') || '5'),
+      timeout: 300000, // 5 minutes
+    });
+
+    // Start workers
+    await service.startWorkers();
+
+    return service;
+  }
+
+  async stop(): Promise<void> {
+    this.isProcessing = false;
+
+    // Stop all workers
+    await Promise.all(
+      this.workers.map(worker => worker.stop())
+    );
+
+    // Clear queue
+    await this.queue.clear();
+
+    this.runtime.logger.info('Background task service stopped');
+  }
+
+  async enqueueTask(task: Task): Promise<string> {
+    const taskId = await this.queue.enqueue(task);
+    this.runtime.logger.debug(`Task enqueued: ${taskId}`);
+    return taskId;
+  }
+
+  private async startWorkers(): Promise<void> {
+    const workerCount = parseInt(
+      this.runtime.getSetting('TASK_WORKERS') || '3'
+    );
+
+    for (let i = 0; i < workerCount; i++) {
+      const worker = new Worker(
+        `worker-${i}`,
+        this.queue,
+        this.processTask.bind(this)
+      );
+
+      this.workers.push(worker);
+      worker.start();
+    }
+
+    this.runtime.logger.info(`Started ${workerCount} background workers`);
+  }
+
+  private async processTask(task: Task): Promise<void> {
+    try {
+      await task.execute();
+      this.runtime.logger.debug(`Task completed: ${task.id}`);
+    } catch (error) {
+      this.runtime.logger.error(`Task failed: ${task.id}`, error);
+      // Handle task failure (retry, dead letter queue, etc.)
+    }
+  }
+}
+```
+
+## Service Registration and Management
+
+### Plugin-based Service Registration
+
+```typescript
+// ✅ DO: Register services through plugins
+const databasePlugin: Plugin = {
+  name: 'database-plugin',
+  description: 'Provides database connectivity',
+
+  services: [DatabaseService, ConnectionPoolService],
+
+  init: async (config, runtime) => {
+    // Services are automatically registered by the runtime
+    // Additional initialization can be done here
+    runtime.logger.info('Database plugin initialized');
+  }
+};
+```
+
+### Runtime Service Management
+
+```typescript
+// ✅ DO: Manage services through the runtime
+async function initializeServices(runtime: IAgentRuntime) {
+  // Services are registered when plugins are loaded
+  await runtime.registerPlugin(databasePlugin);
+
+  // Access services
+  const dbService = runtime.getService<DatabaseService>('database');
+  const poolService = runtime.getService<ConnectionPoolService>('connection_pool');
+
+  // Check service health
+  const services = runtime.getAllServices();
+  for (const [type, serviceInstances] of services) {
+    for (const service of serviceInstances) {
+      // Perform health checks or maintenance
+    }
+  }
+}
+```
+
+### Service Dependencies
+
+```typescript
+// ✅ DO: Handle service dependencies properly
+class DependentService extends Service {
+  static serviceType = 'dependent_service';
+  capabilityDescription = 'A service that depends on other services';
+
+  private dbService?: DatabaseService;
+  private cacheService?: CacheService;
+
+  static async start(runtime: IAgentRuntime): Promise<DependentService> {
+    const service = new DependentService(runtime);
+
+    // Get dependent services
+    service.dbService = runtime.getService<DatabaseService>('database');
+    service.cacheService = runtime.getService<CacheService>('cache');
+
+    // Validate dependencies
+    if (!service.dbService) {
+      throw new Error('Database service is required');
+    }
+
+    if (!service.cacheService) {
+      runtime.logger.warn('Cache service not available, using fallback');
+    }
+
+    return service;
+  }
+
+  async stop(): Promise<void> {
+    // Clean up resources
+    // Note: Don't stop dependent services here, let runtime handle it
+    this.runtime.logger.info('Dependent service stopped');
+  }
+}
+```
+
+## Error Handling and Resilience
+
+### Service Error Types
+
+```typescript
+// ✅ DO: Define specific error types for services
+export interface ServiceError {
+  code: string;
+  message: string;
+  details?: unknown;
+  cause?: Error;
+}
+
+export function createServiceError(error: unknown, code = 'UNKNOWN_ERROR'): ServiceError {
+  if (error instanceof Error) {
+    return {
+      code,
+      message: error.message,
+      cause: error,
+    };
+  }
+
+  return {
+    code,
+    message: String(error),
+  };
+}
+```
+
+### Circuit Breaker Pattern
+
+```typescript
+// ✅ DO: Implement circuit breaker for resilient services
+class ResilientAPIService extends Service {
+  static serviceType = 'resilient_api';
+  capabilityDescription = 'API service with circuit breaker pattern';
+
+  private circuitBreaker: CircuitBreaker;
+
+  static async start(runtime: IAgentRuntime): Promise<ResilientAPIService> {
+    const service = new ResilientAPIService(runtime);
+
+    service.circuitBreaker = new CircuitBreaker({
+      failureThreshold: 5,
+      recoveryTimeout: 60000,
+      monitoringPeriod: 10000,
+    });
+
+    return service;
+  }
+
+  async makeAPICall(endpoint: string, data: any): Promise<any> {
+    return this.circuitBreaker.execute(async () => {
+      try {
+        const response = await fetch(`${this.apiBaseUrl}${endpoint}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(data),
+        });
+
+        if (!response.ok) {
+          throw new Error(`API call failed: ${response.status}`);
+        }
+
+        return await response.json();
+      } catch (error) {
+        throw createServiceError(error, 'API_CALL_FAILED');
+      }
+    });
+  }
+}
+```
+
+### Health Monitoring
+
+```typescript
+// ✅ DO: Implement health checks for services
+interface HealthCheckable {
+  healthCheck(): Promise<HealthStatus>;
+}
+
+interface HealthStatus {
+  status: 'healthy' | 'degraded' | 'unhealthy';
+  details?: Record<string, any>;
+  timestamp: number;
+}
+
+class HealthMonitoredService extends Service implements HealthCheckable {
+  static serviceType = 'health_monitored';
+  capabilityDescription = 'Service with health monitoring';
+
+  private lastHealthCheck = 0;
+  private healthCache?: HealthStatus;
+
+  async healthCheck(): Promise<HealthStatus> {
+    // Cache health checks for performance
+    const now = Date.now();
+    if (this.healthCache && now - this.lastHealthCheck < 30000) {
+      return this.healthCache;
+    }
+
+    try {
+      // Perform actual health check
+      const isHealthy = await this.performHealthCheck();
+
+      this.healthCache = {
+        status: isHealthy ? 'healthy' : 'unhealthy',
+        timestamp: now,
+        details: {
+          responseTime: await this.measureResponseTime(),
+          connections: await this.getConnectionCount(),
+        }
+      };
+    } catch (error) {
+      this.healthCache = {
+        status: 'unhealthy',
+        timestamp: now,
+        details: { error: error.message }
+      };
+    }
+
+    this.lastHealthCheck = now;
+    return this.healthCache;
+  }
+
+  private async performHealthCheck(): Promise<boolean> {
+    // Implement service-specific health check logic
+    return true;
+  }
+
+  private async measureResponseTime(): Promise<number> {
+    const start = Date.now();
+    await this.ping();
+    return Date.now() - start;
+  }
+
+  private async ping(): Promise<void> {
+    // Simple ping operation
+  }
+
+  private async getConnectionCount(): Promise<number> {
+    // Return number of active connections
+    return 0;
+  }
+}
+```
+
+## Best Practices
+
+### Service Design Principles
+
+1. **Single Responsibility**: Each service should have one clear purpose
+2. **Dependency Injection**: Services should receive dependencies through the runtime
+3. **Graceful Degradation**: Services should handle failures of dependent services
+4. **Resource Management**: Properly clean up resources in the `stop` method
+5. **Configuration**: Use runtime settings for service configuration
+6. **Logging**: Use the runtime's logger for consistent logging
+7. **Error Handling**: Use structured error types and proper error propagation
+
+### Performance Optimization
+
+1. **Connection Pooling**: Use connection pools for database and network services
+2. **Caching**: Implement caching for frequently accessed data
+3. **Async Operations**: Use non-blocking operations when possible
+4. **Health Checks**: Implement health checks for monitoring and load balancing
+5. **Circuit Breakers**: Use circuit breakers for external service calls
+
+### Testing Services
+
+```typescript
+// ✅ DO: Test services comprehensively
+describe('DatabaseService', () => {
+  let service: DatabaseService;
+  let mockRuntime: IAgentRuntime;
+
+  beforeEach(async () => {
+    mockRuntime = createMockRuntime();
+    service = await DatabaseService.start(mockRuntime);
+  });
+
+  afterEach(async () => {
+    await service.stop();
+  });
+
+  it('should connect to database successfully', async () => {
+    const isConnected = await service.healthCheck();
+    expect(isConnected).toBe(true);
+  });
+
+  it('should execute queries correctly', async () => {
+    const result = await service.query('SELECT 1 as test');
+    expect(result.rows[0].test).toBe(1);
+  });
+
+  it('should handle connection errors gracefully', async () => {
+    // Simulate connection failure
+    mockRuntime.getSetting = vi.fn().mockReturnValue('invalid-url');
+
+    await expect(service.query('SELECT 1')).rejects.toThrow();
+  });
+});
+```
+
+## References
+
+- [Service Interface](mdc:packages/core/src/types/service.ts)
+- [Service Builder](mdc:packages/core/src/services.ts)
+- [Service Type Registry](mdc:packages/core/src/types/service.ts)
+- [Runtime Service Management](mdc:packages/core/src/runtime.ts)

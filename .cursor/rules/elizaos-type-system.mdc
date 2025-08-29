@@ -1,0 +1,840 @@
+---
+alwaysApply: false
+description: TypeScript type system guide covering all core interfaces, types, and type safety patterns
+globs: **/packages/core/src/types/**,**/packages/core/src/types/index.ts
+---
+
+# ElizaOS Type System Guide
+
+## Core Type Architecture
+
+ElizaOS uses a comprehensive TypeScript type system designed for type safety, extensibility, and developer experience. The type system is organized into logical modules with clear separation of concerns.
+
+### Type Organization
+
+```
+types/
+├── index.ts              # Main type exports
+├── primitives.ts         # Basic types (UUID, Content, Metadata)
+├── state.ts              # State management types
+├── memory.ts             # Memory system types
+├── knowledge.ts          # Knowledge base types
+├── environment.ts        # Entity, Room, World types
+├── agent.ts              # Character and Agent types
+├── components.ts         # Action, Provider, Evaluator types
+├── plugin.ts             # Plugin system types
+├── service.ts            # Service layer types
+├── model.ts              # AI model integration types
+├── database.ts           # Database adapter types
+├── events.ts             # Event system types
+├── task.ts               # Task management types
+├── tee.ts                # Trusted Execution Environment types
+├── runtime.ts            # AgentRuntime interface
+├── token.ts              # Token-related types
+├── messaging.ts          # Message handling types
+├── testing.ts            # Testing utilities types
+├── settings.ts           # Configuration types
+├── wallet.ts             # Blockchain wallet types
+├── lp.ts                 # Liquidity pool types
+├── pdf.ts                # PDF processing types
+├── video.ts              # Video processing types
+├── browser.ts            # Browser automation types
+├── transcription.ts      # Audio transcription types
+├── web-search.ts         # Web search types
+├── email.ts              # Email integration types
+├── message.ts            # Message-specific types
+├── post.ts               # Social media post types
+└── ...
+```
+
+## Primitive Types
+
+### UUID Type System
+
+```typescript
+// ✅ DO: Use branded UUID type for type safety
+export type UUID = `${string}-${string}-${string}-${string}-${string}`;
+
+// Helper function for type-safe UUID creation
+export function asUUID(id: string): UUID {
+  if (!id || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+    throw new Error(`Invalid UUID format: ${id}`);
+  }
+  return id as UUID;
+}
+
+// Usage
+const userId = asUUID('550e8400-e29b-41d4-a716-446655440000');
+// TypeScript now knows userId is a UUID
+```
+
+### Content Interface
+
+```typescript
+// ✅ DO: Use structured content interface
+export interface Content {
+  /** The agent's internal thought process */
+  thought?: string;
+
+  /** The main text content visible to users */
+  text?: string;
+
+  /** Optional actions to be performed */
+  actions?: string[];
+
+  /** Optional providers to use for context generation */
+  providers?: string[];
+
+  /** Optional source/origin of the content */
+  source?: string;
+
+  /** Optional target/destination for responses */
+  target?: string;
+
+  /** URL of the original message/post */
+  url?: string;
+
+  /** UUID of parent message if this is a reply/thread */
+  inReplyTo?: UUID;
+
+  /** Array of media attachments */
+  attachments?: Media[];
+
+  /** Room type */
+  channelType?: string;
+
+  /** Additional dynamic properties */
+  [key: string]: unknown;
+}
+```
+
+### Metadata System
+
+```typescript
+// ✅ DO: Use flexible metadata system
+export type Metadata = Record<string, unknown>;
+
+// Strongly typed metadata when needed
+export interface TypedMetadata extends Metadata {
+  createdAt: number;
+  updatedAt: number;
+  version: string;
+}
+```
+
+## State Management Types
+
+### State Interface
+
+```typescript
+// ✅ DO: Use structured state interface
+export interface State {
+  /** Additional dynamic properties */
+  [key: string]: any;
+
+  /** Directly accessible values */
+  values: {
+    [key: string]: any;
+  };
+
+  /** Structured data */
+  data: {
+    [key: string]: any;
+  };
+
+  /** Textual context summary */
+  text: string;
+}
+```
+
+### Enhanced State
+
+```typescript
+// ✅ DO: Use enhanced state for better type safety
+export interface EnhancedState {
+  /** Typed values object */
+  values: StateObject;
+
+  /** Typed data object */
+  data: StateObject;
+
+  /** Context text */
+  text: string;
+
+  /** Additional properties */
+  [key: string]: StateValue;
+}
+
+export interface StateObject {
+  [key: string]: StateValue;
+}
+
+export type StateValue = string | number | boolean | null | StateObject | StateArray;
+export type StateArray = StateValue[];
+```
+
+## Memory System Types
+
+### Memory Interface
+
+```typescript
+// ✅ DO: Use comprehensive memory interface
+export interface Memory {
+  /** Optional unique identifier */
+  id?: UUID;
+
+  /** Associated user ID */
+  entityId: UUID;
+
+  /** Associated agent ID */
+  agentId?: UUID;
+
+  /** Optional creation timestamp */
+  createdAt?: number;
+
+  /** Memory content */
+  content: Content;
+
+  /** Optional embedding vector */
+  embedding?: number[];
+
+  /** Associated room ID */
+  roomId: UUID;
+
+  /** Associated world ID */
+  worldId?: UUID;
+
+  /** Whether memory is unique */
+  unique?: boolean;
+
+  /** Embedding similarity score */
+  similarity?: number;
+
+  /** Metadata for categorization */
+  metadata?: MemoryMetadata;
+}
+```
+
+### Memory Types and Scopes
+
+```typescript
+// ✅ DO: Use typed memory classification
+export enum MemoryType {
+  DOCUMENT = 'document',
+  FRAGMENT = 'fragment',
+  MESSAGE = 'message',
+  DESCRIPTION = 'description',
+  CUSTOM = 'custom',
+}
+
+export type MemoryScope = 'shared' | 'private' | 'room';
+
+// Strongly typed metadata
+export interface BaseMetadata {
+  type: MemoryTypeAlias;
+  source?: string;
+  sourceId?: UUID;
+  scope?: MemoryScope;
+  timestamp?: number;
+  tags?: string[];
+}
+
+export interface MessageMetadata extends BaseMetadata {
+  type: MemoryType.MESSAGE;
+}
+
+export type MemoryMetadata =
+  | DocumentMetadata
+  | FragmentMetadata
+  | MessageMetadata
+  | DescriptionMetadata
+  | CustomMetadata;
+```
+
+## Component System Types
+
+### Action Types
+
+```typescript
+// ✅ DO: Use strongly typed action interface
+export interface Action {
+  name: string;
+  description: string;
+  examples?: ActionExample[][];
+
+  // Core logic
+  handler: Handler;
+  validate: Validator;
+}
+
+// Type-safe handler and validator
+export type Handler = (
+  runtime: IAgentRuntime,
+  message: Memory,
+  state?: State,
+  options?: { [key: string]: unknown },
+  callback?: HandlerCallback,
+  responses?: Memory[]
+) => Promise<ActionResult | void | undefined>;
+
+export type Validator = (
+  runtime: IAgentRuntime,
+  message: Memory,
+  state?: State
+) => Promise<boolean>;
+
+// Structured action results
+export interface ActionResult {
+  text?: string;
+  values?: Record<string, any>;
+  data?: Record<string, any>;
+  success: boolean;
+  error?: string | Error;
+}
+```
+
+### Provider Types
+
+```typescript
+// ✅ DO: Use typed provider interface
+export interface Provider {
+  name: string;
+  description?: string;
+  dynamic?: boolean;
+  position?: number;
+  private?: boolean;
+
+  get: (runtime: IAgentRuntime, message: Memory, state: State) => Promise<ProviderResult>;
+}
+
+export interface ProviderResult {
+  values?: { [key: string]: any };
+  data?: { [key: string]: any };
+  text?: string;
+}
+```
+
+### Evaluator Types
+
+```typescript
+// ✅ DO: Use comprehensive evaluator interface
+export interface Evaluator {
+  name: string;
+  description: string;
+  alwaysRun?: boolean;
+  examples?: EvaluationExample[];
+
+  handler: Handler;
+  validate: Validator;
+}
+
+export interface EvaluationExample {
+  prompt: string;
+  messages: Array<ActionExample>;
+  outcome: string;
+}
+```
+
+## Plugin System Types
+
+### Plugin Interface
+
+```typescript
+// ✅ DO: Use extensible plugin interface
+export interface Plugin {
+  name: string;
+  description: string;
+
+  // Initialization
+  init?: (config: Record<string, string>, runtime: IAgentRuntime) => Promise<void>;
+
+  // Configuration
+  config?: { [key: string]: any };
+  dependencies?: string[];
+  priority?: number;
+
+  // Components
+  actions?: Action[];
+  providers?: Provider[];
+  evaluators?: Evaluator[];
+  services?: (typeof Service)[];
+
+  // Advanced features
+  adapter?: IDatabaseAdapter;
+  models?: { [key: string]: (...args: any[]) => Promise<any> };
+  events?: PluginEvents;
+  routes?: Route[];
+  tests?: TestSuite[];
+}
+```
+
+### Plugin Events
+
+```typescript
+// ✅ DO: Use typed event system
+export type PluginEvents = {
+  [K in keyof EventPayloadMap]?: EventHandler<K>[];
+} & {
+  [key: string]: ((params: any) => Promise<any>)[];
+};
+
+export interface EventPayloadMap {
+  MESSAGE_RECEIVED: { message: Memory };
+  ACTION_COMPLETED: { actionName: string; result: ActionResult };
+  PLUGIN_INITIALIZED: { pluginName: string };
+}
+```
+
+## Service Layer Types
+
+### Service Interface
+
+```typescript
+// ✅ DO: Use typed service interface
+export abstract class Service {
+  /** Runtime instance */
+  protected runtime!: IAgentRuntime;
+
+  constructor(runtime?: IAgentRuntime) {
+    if (runtime) {
+      this.runtime = runtime;
+    }
+  }
+
+  /** Service type identifier */
+  static serviceType: string;
+
+  /** Human-readable description */
+  abstract capabilityDescription: string;
+
+  /** Service configuration */
+  config?: Metadata;
+
+  /** Start service connection */
+  static async start(_runtime: IAgentRuntime): Promise<Service> {
+    throw new Error('Not implemented');
+  }
+
+  /** Stop service connection */
+  abstract stop(): Promise<void>;
+}
+```
+
+### Service Type Registry
+
+```typescript
+// ✅ DO: Use extensible service type system
+export interface ServiceTypeRegistry {
+  TRANSCRIPTION: 'transcription';
+  VIDEO: 'video';
+  BROWSER: 'browser';
+  PDF: 'pdf';
+  REMOTE_FILES: 'aws_s3';
+  WEB_SEARCH: 'web_search';
+  EMAIL: 'email';
+  TEE: 'tee';
+  TASK: 'task';
+  WALLET: 'wallet';
+  // ... extensible via module augmentation
+}
+
+export type ServiceTypeName = ServiceTypeRegistry[keyof ServiceTypeRegistry];
+```
+
+## Model Integration Types
+
+### Model Type System
+
+```typescript
+// ✅ DO: Use comprehensive model type system
+export const ModelType = {
+  TEXT_SMALL: 'TEXT_SMALL',
+  TEXT_LARGE: 'TEXT_LARGE',
+  TEXT_EMBEDDING: 'TEXT_EMBEDDING',
+  TEXT_TOKENIZER_ENCODE: 'TEXT_TOKENIZER_ENCODE',
+  TEXT_TOKENIZER_DECODE: 'TEXT_TOKENIZER_DECODE',
+  IMAGE: 'IMAGE',
+  IMAGE_DESCRIPTION: 'IMAGE_DESCRIPTION',
+  TRANSCRIPTION: 'TRANSCRIPTION',
+  TEXT_TO_SPEECH: 'TEXT_TO_SPEECH',
+  // ... and more
+} as const;
+
+export type ModelTypeName = (typeof ModelType)[keyof typeof ModelType] | string;
+```
+
+### Model Parameters and Results
+
+```typescript
+// ✅ DO: Use strongly typed model interfaces
+export interface TextGenerationParams extends BaseModelParams {
+  prompt: string;
+  temperature?: number;
+  maxTokens?: number;
+  stopSequences?: string[];
+  frequencyPenalty?: number;
+  presencePenalty?: number;
+}
+
+export interface TextEmbeddingParams extends BaseModelParams {
+  text: string;
+}
+
+export interface ModelParamsMap {
+  [ModelType.TEXT_SMALL]: TextGenerationParams;
+  [ModelType.TEXT_LARGE]: TextGenerationParams;
+  [ModelType.TEXT_EMBEDDING]: TextEmbeddingParams | string | null;
+  // ... and more
+}
+
+export interface ModelResultMap {
+  [ModelType.TEXT_SMALL]: string;
+  [ModelType.TEXT_LARGE]: string;
+  [ModelType.TEXT_EMBEDDING]: number[];
+  // ... and more
+}
+```
+
+## Database Types
+
+### Database Adapter Interface
+
+```typescript
+// ✅ DO: Use comprehensive database interface
+export interface IDatabaseAdapter {
+  /** Database instance */
+  db: any;
+
+  /** Initialize connection */
+  initialize(config?: any): Promise<void>;
+
+  /** Check readiness */
+  isReady(): Promise<boolean>;
+
+  /** Close connection */
+  close(): Promise<void>;
+
+  // Memory operations
+  createMemory(memory: Memory): Promise<UUID>;
+  getMemories(params: GetMemoriesParams): Promise<Memory[]>;
+  searchMemories(params: SearchMemoriesParams): Promise<Memory[]>;
+  updateMemory(memory: Partial<Memory> & { id: UUID }): Promise<boolean>;
+
+  // Entity operations
+  createEntity(entity: Entity): Promise<boolean>;
+  getEntity(entityId: UUID): Promise<Entity | null>;
+  updateEntity(entity: Entity): Promise<void>;
+
+  // Room operations
+  createRoom(room: Room): Promise<UUID>;
+  getRoom(roomId: UUID): Promise<Room | null>;
+  addParticipant(entityId: UUID, roomId: UUID): Promise<boolean>;
+}
+```
+
+## Runtime Types
+
+### AgentRuntime Interface
+
+```typescript
+// ✅ DO: Use comprehensive runtime interface
+export interface IAgentRuntime extends IDatabaseAdapter {
+  // Core properties
+  agentId: UUID;
+  character: Character;
+  providers: Provider[];
+  actions: Action[];
+  evaluators: Evaluator[];
+  plugins: Plugin[];
+  services: Map<ServiceTypeName, Service[]>;
+  events: Map<string, ((params: any) => Promise<void>)[]>;
+
+  // Core methods
+  registerPlugin(plugin: Plugin): Promise<void>;
+  initialize(): Promise<void>;
+  start(): Promise<void>;
+  stop(): Promise<void>;
+
+  // Service management
+  getService<T extends Service>(service: ServiceTypeName | string): T | null;
+  registerService(service: typeof Service): Promise<void>;
+
+  // State management
+  composeState(message: Memory, includeList?: string[], onlyInclude?: boolean, skipCache?: boolean): Promise<State>;
+
+  // Model integration
+  useModel<T extends ModelTypeName, R = ModelResultMap[T]>(
+    modelType: T,
+    params: Omit<ModelParamsMap[T], 'runtime'> | any
+  ): Promise<R>;
+
+  registerModel(
+    modelType: ModelTypeName | string,
+    handler: (params: any) => Promise<any>,
+    provider: string,
+    priority?: number
+  ): void;
+
+  // Memory operations (inherited from IDatabaseAdapter)
+  // ... comprehensive memory management
+
+  // Utility methods
+  createRunId(): UUID;
+  startRun(): UUID;
+  endRun(): void;
+  getCurrentRunId(): UUID;
+}
+```
+
+## Type Safety Patterns
+
+### Branded Types
+
+```typescript
+// ✅ DO: Use branded types for domain-specific safety
+export type UserId = UUID & { readonly __brand: 'UserId' };
+export type RoomId = UUID & { readonly __brand: 'RoomId' };
+export type AgentId = UUID & { readonly __brand: 'AgentId' };
+
+// Factory functions for branded types
+export function createUserId(id: string): UserId {
+  return asUUID(id) as UserId;
+}
+
+export function createRoomId(id: string): RoomId {
+  return asUUID(id) as RoomId;
+}
+
+export function createAgentId(id: string): AgentId {
+  return asUUID(id) as AgentId;
+}
+```
+
+### Discriminated Unions
+
+```typescript
+// ✅ DO: Use discriminated unions for type safety
+export type MessageContent =
+  | { type: 'text'; text: string }
+  | { type: 'image'; url: string; alt?: string }
+  | { type: 'audio'; url: string; duration?: number }
+  | { type: 'video'; url: string; duration?: number };
+
+// Type-safe handling
+function processMessageContent(content: MessageContent) {
+  switch (content.type) {
+    case 'text':
+      return processText(content.text);
+    case 'image':
+      return processImage(content.url, content.alt);
+    case 'audio':
+      return processAudio(content.url, content.duration);
+    case 'video':
+      return processVideo(content.url, content.duration);
+  }
+}
+```
+
+### Generic Constraints
+
+```typescript
+// ✅ DO: Use generic constraints for flexible but safe types
+export interface ApiResponse<TData = unknown> {
+  success: boolean;
+  data?: TData;
+  error?: {
+    code: string;
+    message: string;
+    details?: unknown;
+  };
+  meta?: {
+    timestamp: string;
+    version: string;
+    requestId: string;
+  };
+}
+
+// Usage with specific types
+type UserResponse = ApiResponse<User>;
+type MemoryListResponse = ApiResponse<Memory[]>;
+```
+
+### Utility Types
+
+```typescript
+// ✅ DO: Create utility types for common patterns
+export type Optional<T, K extends keyof T> = Omit<T, K> & Partial<Pick<T, K>>;
+
+export type RequiredFields<T, K extends keyof T> = T & Required<Pick<T, K>>;
+
+export type DeepPartial<T> = {
+  [P in keyof T]?: T[P] extends object ? DeepPartial<T[P]> : T[P];
+};
+
+export type NonNullableFields<T> = {
+  [P in keyof T]-?: NonNullable<T[P]>;
+};
+```
+
+## Type Guards and Assertions
+
+### Type Guards
+
+```typescript
+// ✅ DO: Use type guards for runtime type checking
+export function isMemory(obj: unknown): obj is Memory {
+  return (
+    typeof obj === 'object' &&
+    obj !== null &&
+    'entityId' in obj &&
+    'roomId' in obj &&
+    'content' in obj &&
+    typeof (obj as Memory).entityId === 'string' &&
+    typeof (obj as Memory).roomId === 'string'
+  );
+}
+
+export function isAction(obj: unknown): obj is Action {
+  return (
+    typeof obj === 'object' &&
+    obj !== null &&
+    'name' in obj &&
+    'handler' in obj &&
+    'validate' in obj &&
+    typeof (obj as Action).name === 'string'
+  );
+}
+```
+
+### Type Assertions
+
+```typescript
+// ✅ DO: Use safe type assertions with validation
+export function assertIsMemory(obj: unknown): asserts obj is Memory {
+  if (!isMemory(obj)) {
+    throw new Error('Object is not a valid Memory');
+  }
+}
+
+export function safeCast<T>(obj: unknown, guard: (obj: unknown) => obj is T): T {
+  if (guard(obj)) {
+    return obj;
+  }
+  throw new Error('Type guard failed');
+}
+```
+
+## Module Augmentation
+
+### Extending Core Types
+
+```typescript
+// ✅ DO: Use module augmentation to extend core types
+declare module '@elizaos/core' {
+  interface ServiceTypeRegistry {
+    MY_CUSTOM_SERVICE: 'my_custom_service';
+    ANOTHER_SERVICE: 'another_service';
+  }
+
+  interface Character {
+    customField?: string;
+  }
+
+  interface Plugin {
+    customProperty?: any;
+  }
+}
+```
+
+### Plugin-Specific Types
+
+```typescript
+// ✅ DO: Create plugin-specific type extensions
+declare module '@elizaos/core' {
+  interface ModelParamsMap {
+    'CUSTOM_MODEL': CustomModelParams;
+  }
+
+  interface ModelResultMap {
+    'CUSTOM_MODEL': CustomModelResult;
+  }
+
+  interface EventPayloadMap {
+    'CUSTOM_EVENT': CustomEventPayload;
+  }
+}
+```
+
+## Best Practices
+
+### Type Design Principles
+
+1. **Strong Typing**: Use specific types over generic `any` or `unknown`
+2. **Immutability**: Prefer readonly properties and immutable patterns
+3. **Composition**: Build complex types through composition of simpler types
+4. **Documentation**: Include comprehensive JSDoc comments for all public types
+5. **Extensibility**: Design types to be easily extensible without breaking changes
+
+### Naming Conventions
+
+1. **Interfaces**: Use PascalCase (e.g., `IAgentRuntime`, `Character`)
+2. **Types**: Use PascalCase for unions, intersections (e.g., `MemoryMetadata`)
+3. **Enums**: Use PascalCase for enum names, SCREAMING_SNAKE_CASE for values
+4. **Generic Parameters**: Use single uppercase letters (e.g., `T`, `U`, `K`)
+5. **Branded Types**: Use descriptive names with brand information
+
+### Error Handling Types
+
+```typescript
+// ✅ DO: Use structured error types
+export interface ServiceError {
+  code: string;
+  message: string;
+  details?: unknown;
+  cause?: Error;
+}
+
+export interface ValidationError {
+  field: string;
+  value: unknown;
+  constraint: string;
+  message: string;
+}
+
+export interface ApiError {
+  statusCode: number;
+  code: string;
+  message: string;
+  details?: Record<string, any>;
+}
+```
+
+### Testing Types
+
+```typescript
+// ✅ DO: Use types for testing utilities
+export interface TestSuite {
+  name: string;
+  description?: string;
+  setup?: () => Promise<void>;
+  teardown?: () => Promise<void>;
+  tests: Record<string, TestFunction>;
+}
+
+export type TestFunction = (runtime: IAgentRuntime) => Promise<void>;
+
+export interface MockRuntime extends IAgentRuntime {
+  // Mock-specific properties and methods
+  reset(): void;
+  getCallHistory(): CallHistory[];
+  setMockResponse(method: string, response: any): void;
+}
+```
+
+## References
+
+- [TypeScript Handbook](mdc:https:/www.typescriptlang.org/docs)
+- [TypeScript Utility Types](mdc:https:/www.typescriptlang.org/docs/handbook/utility-types.html)
+- [Advanced Types](mdc:https:/www.typescriptlang.org/docs/handbook/advanced-types.html)
+- [Core Types Source](mdc:packages/core/src/types/)
+- [Type Safety Best Practices](mdc:https:/www.typescriptlang.org/docs/handbook/declaration-files/do-s-and-don-ts.html)

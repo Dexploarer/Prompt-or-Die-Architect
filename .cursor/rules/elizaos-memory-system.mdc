@@ -1,0 +1,694 @@
+---
+alwaysApply: false
+description: Memory system guide covering Memory interface, database operations, and state management
+globs: **/packages/core/src/types/memory.ts,**/packages/core/src/types/database.ts,**/packages/core/src/types/state.ts,**/packages/core/src/database.ts
+---
+
+# ElizaOS Memory System Guide
+
+## Memory Architecture Overview
+
+The ElizaOS memory system provides persistent storage and retrieval of conversational data, entities, and contextual information. It supports both structured queries and semantic search through vector embeddings.
+
+### Core Memory Concepts
+
+```mermaid
+graph TD
+    A[Memory System] --> B[Memory Interface]
+    A --> C[Database Adapter]
+    A --> D[State Management]
+
+    B --> E[Content Storage]
+    B --> F[Metadata System]
+    B --> G[Embedding Support]
+
+    C --> H[CRUD Operations]
+    C --> I[Semantic Search]
+    C --> J[Entity Management]
+
+    D --> K[State Composition]
+    D --> L[Context Building]
+    D --> M[Provider Integration]
+```
+
+### Memory Interface
+
+The core `Memory` interface represents stored information:
+
+```typescript
+export interface Memory {
+  /** Optional unique identifier */
+  id?: UUID;
+
+  /** Associated user ID */
+  entityId: UUID;
+
+  /** Associated agent ID */
+  agentId?: UUID;
+
+  /** Optional creation timestamp */
+  createdAt?: number;
+
+  /** Memory content */
+  content: Content;
+
+  /** Optional embedding vector for semantic search */
+  embedding?: number[];
+
+  /** Associated room ID */
+  roomId: UUID;
+
+  /** Associated world ID */
+  worldId?: UUID;
+
+  /** Whether memory is unique */
+  unique?: boolean;
+
+  /** Embedding similarity score */
+  similarity?: number;
+
+  /** Metadata for categorization */
+  metadata?: MemoryMetadata;
+}
+```
+
+### Content Structure
+
+```typescript
+export interface Content {
+  /** Primary text content */
+  text?: string;
+
+  /** Associated actions */
+  actions?: string[];
+
+  /** Source information */
+  source?: string;
+
+  /** Additional attachments or media */
+  attachments?: any[];
+
+  /** Processing metadata */
+  metadata?: Record<string, any>;
+}
+```
+
+## Memory Types and Metadata
+
+### Memory Type System
+
+```typescript
+export enum MemoryType {
+  DOCUMENT = 'document',     // Whole documents
+  FRAGMENT = 'fragment',     // Document chunks
+  MESSAGE = 'message',       // Conversational messages
+  DESCRIPTION = 'description', // Entity descriptions
+  CUSTOM = 'custom'         // Custom types
+}
+
+export type MemoryScope = 'shared' | 'private' | 'room';
+```
+
+### Metadata System
+
+```typescript
+export interface BaseMetadata {
+  type: MemoryTypeAlias;
+  source?: string;           // Origin (e.g., 'discord', 'web')
+  sourceId?: UUID;          // Source entity ID
+  scope?: MemoryScope;      // Visibility scope
+  timestamp?: number;       // Creation time
+  tags?: string[];          // Categorization tags
+}
+
+export interface DocumentMetadata extends BaseMetadata {
+  type: MemoryType.DOCUMENT;
+}
+
+export interface FragmentMetadata extends BaseMetadata {
+  type: MemoryType.FRAGMENT;
+  documentId: UUID;         // Parent document
+  position: number;         // Position in document
+}
+
+export interface MessageMetadata extends BaseMetadata {
+  type: MemoryType.MESSAGE;
+}
+
+export type MemoryMetadata =
+  | DocumentMetadata
+  | FragmentMetadata
+  | MessageMetadata
+  | DescriptionMetadata
+  | CustomMetadata;
+```
+
+## Database Operations
+
+### IDatabaseAdapter Interface
+
+The database adapter provides the core persistence layer:
+
+```typescript
+export interface IDatabaseAdapter {
+  /** Database instance */
+  db: any;
+
+  /** Initialize connection */
+  initialize(config?: any): Promise<void>;
+
+  /** Check readiness */
+  isReady(): Promise<boolean>;
+
+  /** Close connection */
+  close(): Promise<void>;
+
+  // Memory operations
+  createMemory(memory: Memory): Promise<UUID>;
+  getMemories(params: GetMemoriesParams): Promise<Memory[]>;
+  searchMemories(params: SearchMemoriesParams): Promise<Memory[]>;
+  updateMemory(memory: Partial<Memory> & { id: UUID }): Promise<boolean>;
+
+  // Entity operations
+  createEntity(entity: Entity): Promise<boolean>;
+  getEntity(entityId: UUID): Promise<Entity | null>;
+  updateEntity(entity: Entity): Promise<void>;
+
+  // Room operations
+  createRoom(room: Room): Promise<UUID>;
+  getRoom(roomId: UUID): Promise<Room | null>;
+  addParticipant(entityId: UUID, roomId: UUID): Promise<boolean>;
+}
+```
+
+### Memory Operations
+
+#### Creating Memories
+
+```typescript
+// ✅ DO: Create memories with proper metadata
+async function createUserMessage(
+  runtime: IAgentRuntime,
+  userId: UUID,
+  roomId: UUID,
+  messageText: string
+): Promise<UUID> {
+  const memory: Memory = {
+    entityId: userId,
+    roomId: roomId,
+    content: {
+      text: messageText,
+      source: 'user_input'
+    },
+    metadata: {
+      type: MemoryType.MESSAGE,
+      source: 'chat',
+      scope: 'room',
+      timestamp: Date.now(),
+      tags: ['user', 'message']
+    }
+  };
+
+  // Generate embedding for semantic search
+  if (runtime.embed) {
+    memory.embedding = await runtime.embed(messageText);
+  }
+
+  return await runtime.createMemory(memory);
+}
+```
+
+#### Retrieving Memories
+
+```typescript
+// ✅ DO: Retrieve memories with appropriate filters
+async function getConversationHistory(
+  runtime: IAgentRuntime,
+  roomId: UUID,
+  limit: number = 50
+): Promise<Memory[]> {
+  return await runtime.getMemories({
+    roomId: roomId,
+    count: limit,
+    // Only get message-type memories
+    types: [MemoryType.MESSAGE]
+  });
+}
+
+// ✅ DO: Use semantic search for relevant memories
+async function findRelevantContext(
+  runtime: IAgentRuntime,
+  query: string,
+  roomId: UUID
+): Promise<Memory[]> {
+  const queryEmbedding = await runtime.embed(query);
+
+  return await runtime.searchMemories({
+    embedding: queryEmbedding,
+    roomId: roomId,
+    match_threshold: 0.7,  // Similarity threshold
+    count: 10,
+    // Filter by memory type
+    types: [MemoryType.DOCUMENT, MemoryType.FRAGMENT]
+  });
+}
+```
+
+#### Updating Memories
+
+```typescript
+// ✅ DO: Update memories with new information
+async function updateMemoryWithResponse(
+  runtime: IAgentRuntime,
+  memoryId: UUID,
+  agentResponse: string
+): Promise<boolean> {
+  const updateData = {
+    id: memoryId,
+    content: {
+      text: agentResponse,
+      source: 'agent_response'
+    },
+    metadata: {
+      type: MemoryType.MESSAGE,
+      source: 'agent',
+      timestamp: Date.now(),
+      tags: ['agent', 'response']
+    }
+  };
+
+  // Generate embedding for the response
+  if (runtime.embed) {
+    updateData.embedding = await runtime.embed(agentResponse);
+  }
+
+  return await runtime.updateMemory(updateData);
+}
+```
+
+## State Management
+
+### State Interface
+
+The `State` interface represents the current conversational context:
+
+```typescript
+export interface State {
+  /** Additional dynamic properties */
+  [key: string]: any;
+
+  /** Directly accessible values */
+  values: {
+    [key: string]: any;
+  };
+
+  /** Structured data */
+  data: {
+    [key: string]: any;
+  };
+
+  /** Textual context summary */
+  text: string;
+}
+```
+
+### Enhanced State
+
+For better type safety, use the enhanced state interface:
+
+```typescript
+export interface EnhancedState {
+  /** Typed values object */
+  values: StateObject;
+
+  /** Typed data object */
+  data: StateObject;
+
+  /** Context text */
+  text: string;
+
+  /** Additional properties */
+  [key: string]: StateValue;
+}
+
+export interface StateObject {
+  [key: string]: StateValue;
+}
+
+export type StateValue = string | number | boolean | null | StateObject | StateArray;
+export type StateArray = StateValue[];
+```
+
+### State Composition
+
+The runtime composes state from providers before processing messages:
+
+```typescript
+// ✅ DO: Use state composition for context building
+async function buildConversationContext(
+  runtime: IAgentRuntime,
+  message: Memory
+): Promise<State> {
+  // Get recent conversation history
+  const recentMessages = await runtime.getMemories({
+    roomId: message.roomId,
+    count: 20
+  });
+
+  // Get relevant context via semantic search
+  const relevantContext = await runtime.searchMemories({
+    embedding: message.embedding || [],
+    roomId: message.roomId,
+    match_threshold: 0.8,
+    count: 5
+  });
+
+  // Compose state from providers
+  const state = await runtime.composeState(message, ['time', 'user_profile']);
+
+  // Add conversation context
+  state.values.conversationHistory = recentMessages.map(m => m.content.text);
+  state.values.relevantContext = relevantContext.map(m => m.content.text);
+
+  // Update text summary
+  state.text += `\n\nRecent conversation:\n${recentMessages.map(m => m.content.text).join('\n')}`;
+
+  return state;
+}
+```
+
+## Entity and Relationship Management
+
+### Entity System
+
+Entities represent people, objects, or concepts in the system:
+
+```typescript
+export interface Entity {
+  id?: UUID;
+  names: string[];           // Multiple names/aliases
+  metadata?: Record<string, any>;
+  agentId: UUID;
+  createdAt?: number;
+  updatedAt?: number;
+}
+```
+
+### Managing Entities
+
+```typescript
+// ✅ DO: Create and manage entities
+async function manageUserEntity(
+  runtime: IAgentRuntime,
+  userId: UUID,
+  userInfo: any
+): Promise<Entity> {
+  // Check if entity exists
+  let entity = await runtime.getEntityById(userId);
+
+  if (!entity) {
+    // Create new entity
+    entity = {
+      id: userId,
+      names: [userInfo.username, userInfo.displayName].filter(Boolean),
+      metadata: {
+        email: userInfo.email,
+        avatar: userInfo.avatar,
+        preferences: userInfo.preferences || {}
+      },
+      agentId: runtime.agentId,
+      createdAt: Date.now()
+    };
+
+    await runtime.createEntity(entity);
+  } else {
+    // Update existing entity
+    entity.metadata = { ...entity.metadata, ...userInfo };
+    entity.updatedAt = Date.now();
+    await runtime.updateEntity(entity);
+  }
+
+  return entity;
+}
+```
+
+### Relationship System
+
+Relationships connect entities with typed connections:
+
+```typescript
+export interface Relationship {
+  id: UUID;
+  sourceEntityId: UUID;
+  targetEntityId: UUID;
+  type: string;              // e.g., 'knows', 'works_with', 'friend'
+  weight?: number;           // Relationship strength (0-1)
+  metadata?: Record<string, any>;
+  createdAt?: number;
+}
+```
+
+### Managing Relationships
+
+```typescript
+// ✅ DO: Create and query relationships
+async function establishUserRelationship(
+  runtime: IAgentRuntime,
+  userId1: UUID,
+  userId2: UUID,
+  relationshipType: string
+): Promise<void> {
+  const relationship = {
+    sourceEntityId: userId1,
+    targetEntityId: userId2,
+    type: relationshipType,
+    weight: 0.8,
+    metadata: {
+      established: Date.now(),
+      context: 'conversation'
+    }
+  };
+
+  await runtime.createRelationship(relationship);
+}
+
+// ✅ DO: Query relationship network
+async function findRelatedUsers(
+  runtime: IAgentRuntime,
+  userId: UUID,
+  relationshipType?: string
+): Promise<Entity[]> {
+  const relationships = await runtime.getRelationships({
+    entityId: userId,
+    type: relationshipType
+  });
+
+  const relatedEntityIds = relationships.map(r =>
+    r.sourceEntityId === userId ? r.targetEntityId : r.sourceEntityId
+  );
+
+  return await runtime.getEntitiesByIds(relatedEntityIds);
+}
+```
+
+## Room and World Management
+
+### Room System
+
+Rooms represent conversation contexts:
+
+```typescript
+export interface Room {
+  id: UUID;
+  name?: string;
+  source: string;            // e.g., 'discord', 'slack', 'web'
+  type: ChannelType;         // 'dm', 'group', 'channel'
+  channelId?: string;        // Platform-specific ID
+  serverId?: string;         // Server/guild ID
+  worldId?: UUID;
+  createdAt?: number;
+}
+```
+
+### Managing Rooms
+
+```typescript
+// ✅ DO: Create and manage conversation rooms
+async function ensureRoomExists(
+  runtime: IAgentRuntime,
+  channelInfo: any,
+  source: string
+): Promise<Room> {
+  // Check if room already exists
+  let room = await runtime.getRoomByChannelId(channelInfo.id, source);
+
+  if (!room) {
+    // Create new room
+    room = {
+      name: channelInfo.name,
+      source: source,
+      type: channelInfo.type,
+      channelId: channelInfo.id,
+      serverId: channelInfo.serverId
+    };
+
+    const roomId = await runtime.createRoom(room);
+    room.id = roomId;
+  }
+
+  return room;
+}
+
+// ✅ DO: Add participants to rooms
+async function addRoomParticipant(
+  runtime: IAgentRuntime,
+  roomId: UUID,
+  entityId: UUID
+): Promise<void> {
+  await runtime.addParticipant(entityId, roomId);
+
+  // Create participant record for tracking
+  const participant = {
+    entityId: entityId,
+    roomId: roomId,
+    joinedAt: Date.now(),
+    role: 'member'
+  };
+
+  // Store participant info (implementation depends on adapter)
+  await runtime.createParticipant(participant);
+}
+```
+
+## Best Practices
+
+### Memory Management
+
+1. **Use Appropriate Memory Types**: Choose the right memory type for your data
+2. **Include Metadata**: Always provide metadata for better categorization and querying
+3. **Generate Embeddings**: Use embeddings for semantic search when possible
+4. **Handle Uniqueness**: Use the `unique` flag to prevent duplicate memories
+5. **Batch Operations**: Batch memory operations for better performance
+
+### State Management
+
+1. **Keep State Focused**: Only include relevant information in state
+2. **Use Providers**: Leverage providers for dynamic state composition
+3. **Cache State**: Use state caching to avoid redundant computations
+4. **Validate State**: Ensure state consistency before using it
+5. **Clean Up State**: Remove stale or unnecessary state data
+
+### Database Operations
+
+1. **Use Transactions**: Wrap related operations in transactions
+2. **Handle Errors**: Implement proper error handling for database operations
+3. **Optimize Queries**: Use appropriate indexes and query patterns
+4. **Monitor Performance**: Track query performance and optimize slow operations
+5. **Backup Strategy**: Implement regular backups and recovery procedures
+
+### Performance Optimization
+
+#### Memory Retrieval Optimization
+
+```typescript
+// ✅ DO: Optimize memory retrieval with filters
+async function getOptimizedMemories(
+  runtime: IAgentRuntime,
+  roomId: UUID,
+  options: {
+    limit?: number;
+    since?: number;
+    types?: MemoryType[];
+    includeEmbeddings?: boolean;
+  }
+): Promise<Memory[]> {
+  const memories = await runtime.getMemories({
+    roomId: roomId,
+    count: options.limit || 50,
+    start: options.since,
+    types: options.types,
+    // Only include embeddings if needed
+    includeEmbeddings: options.includeEmbeddings
+  });
+
+  return memories;
+}
+```
+
+#### Embedding Management
+
+```typescript
+// ✅ DO: Batch embedding generation for performance
+async function generateEmbeddingsBatch(
+  runtime: IAgentRuntime,
+  texts: string[]
+): Promise<number[][]> {
+  const embeddings: number[][] = [];
+
+  // Process in batches to avoid rate limits
+  const batchSize = 10;
+  for (let i = 0; i < texts.length; i += batchSize) {
+    const batch = texts.slice(i, i + batchSize);
+    const batchEmbeddings = await Promise.all(
+      batch.map(text => runtime.embed(text))
+    );
+    embeddings.push(...batchEmbeddings);
+
+    // Add delay between batches if needed
+    if (i + batchSize < texts.length) {
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+  }
+
+  return embeddings;
+}
+```
+
+#### State Caching Strategy
+
+```typescript
+// ✅ DO: Implement intelligent state caching
+class StateCache {
+  private cache = new Map<string, { state: State; timestamp: number }>();
+  private readonly ttl = 5 * 60 * 1000; // 5 minutes
+
+  get(key: string): State | null {
+    const cached = this.cache.get(key);
+    if (!cached) return null;
+
+    if (Date.now() - cached.timestamp > this.ttl) {
+      this.cache.delete(key);
+      return null;
+    }
+
+    return cached.state;
+  }
+
+  set(key: string, state: State): void {
+    this.cache.set(key, {
+      state: JSON.parse(JSON.stringify(state)), // Deep clone
+      timestamp: Date.now()
+    });
+  }
+
+  invalidate(pattern?: string): void {
+    if (!pattern) {
+      this.cache.clear();
+      return;
+    }
+
+    for (const key of this.cache.keys()) {
+      if (key.includes(pattern)) {
+        this.cache.delete(key);
+      }
+    }
+  }
+}
+```
+
+## References
+
+- [Memory Types](mdc:packages/core/src/types/memory.ts)
+- [Database Adapter](mdc:packages/core/src/types/database.ts)
+- [State Management](mdc:packages/core/src/types/state.ts)
+- [Runtime Memory Operations](mdc:packages/core/src/runtime.ts)

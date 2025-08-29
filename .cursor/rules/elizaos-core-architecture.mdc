@@ -1,0 +1,357 @@
+---
+alwaysApply: false
+description: Core architecture guide for ElizaOS runtime and agent management
+globs: **/packages/core/src/**,**/eliza/packages/core/src/**
+---
+
+# ElizaOS Core Architecture Guide
+
+## AgentRuntime: The Heart of ElizaOS
+
+The `AgentRuntime` class implements the `IAgentRuntime` interface and serves as the central orchestrator for all agent operations. It manages the entire lifecycle of an AI agent, from initialization to execution.
+
+### Key Responsibilities
+
+```typescript
+export class AgentRuntime implements IAgentRuntime {
+  readonly agentId: UUID;
+  readonly character: Character;
+  public adapter!: IDatabaseAdapter;
+  readonly actions: Action[] = [];
+  readonly evaluators: Evaluator[] = [];
+  readonly providers: Provider[] = [];
+  readonly plugins: Plugin[] = [];
+  // ... additional properties
+}
+```
+
+### Core Lifecycle Methods
+
+#### `initialize(): Promise<void>`
+Initializes the runtime and all registered components:
+- Connects to the database adapter
+- Registers all plugins and their components
+- Sets up event handlers and services
+- Validates configuration
+
+```typescript
+// ✅ DO: Proper initialization with error handling
+try {
+  await runtime.initialize();
+  console.log('Runtime initialized successfully');
+} catch (error) {
+  logger.error('Failed to initialize runtime:', error);
+  throw error;
+}
+```
+
+#### `start(): Promise<void>`
+Starts the runtime operations:
+- Begins processing messages
+- Starts background services
+- Opens network connections
+- Enables real-time operations
+
+#### `stop(): Promise<void>`
+Gracefully shuts down the runtime:
+- Stops all services
+- Closes database connections
+- Cleans up resources
+- Saves final state
+
+### Component Registration
+
+The runtime provides methods to register different types of components:
+
+```typescript
+// Registering components with the runtime
+await runtime.registerPlugin(plugin);
+runtime.registerAction(action);
+runtime.registerProvider(provider);
+runtime.registerEvaluator(evaluator);
+await runtime.registerService(service);
+```
+
+### State Management
+
+The runtime manages agent state through the `composeState` method:
+
+```typescript
+// Compose state from all providers
+const state = await runtime.composeState(message, includeList, onlyInclude, skipCache);
+
+// State is cached by message ID for performance
+const cachedState = runtime.stateCache.get(messageId);
+```
+
+### Event System
+
+The runtime includes a built-in event system for component communication:
+
+```typescript
+// Registering event handlers
+runtime.registerEvent('MESSAGE_RECEIVED', async (params) => {
+  console.log('Message received:', params);
+});
+
+// Emitting events
+await runtime.emitEvent('MESSAGE_RECEIVED', { messageId, content });
+```
+
+## Memory Management
+
+The runtime provides comprehensive memory operations through the database adapter:
+
+### Memory Operations
+
+```typescript
+// Creating memories
+const memoryId = await runtime.createMemory({
+  agentId: runtime.agentId,
+  entityId: userId,
+  roomId: roomId,
+  content: { text: messageText },
+  embedding: await runtime.embed(messageText)
+});
+
+// Retrieving memories
+const recentMemories = await runtime.getMemories({
+  roomId: roomId,
+  count: 10
+});
+
+// Semantic search
+const relevantMemories = await runtime.searchMemories({
+  query: searchQuery,
+  match_threshold: 0.8,
+  count: 5
+});
+```
+
+### Memory Types
+
+The core defines different types of memory content:
+
+```typescript
+interface Memory {
+  id?: UUID;
+  entityId: UUID;      // Who created the memory
+  roomId: UUID;        // Conversation context
+  worldId?: UUID;      // Broader context
+  content: Content;    // The actual content
+  embedding?: number[]; // Vector representation
+  createdAt?: number;  // Timestamp
+}
+
+interface Content {
+  text?: string;       // Text content
+  actions?: string[];  // Associated actions
+  // ... other content types
+}
+```
+
+## Model Integration
+
+The runtime provides unified access to different AI models:
+
+```typescript
+// Using models for text generation
+const response = await runtime.useModel(ModelType.TEXT_LARGE, {
+  prompt: userPrompt,
+  temperature: 0.7,
+  maxTokens: 2000
+});
+
+// Using models for embeddings
+const embedding = await runtime.useModel(ModelType.TEXT_EMBEDDING, {
+  text: inputText
+});
+```
+
+### Model Registration
+
+```typescript
+// Register custom model handlers
+runtime.registerModel(ModelType.TEXT_LARGE, async (params) => {
+  // Custom model implementation
+  return await callCustomModel(params);
+}, 'custom-provider', 10); // Priority 10
+```
+
+## Service Management
+
+The runtime manages background services with lifecycle control:
+
+```typescript
+// Getting services
+const databaseService = runtime.getService<DatabaseService>('database');
+const allCacheServices = runtime.getServicesByType<CacheService>('cache');
+
+// Checking service availability
+if (runtime.hasService('required-service')) {
+  // Service is available
+}
+```
+
+## Best Practices
+
+### Runtime Initialization
+
+```typescript
+// ✅ DO: Proper error handling during initialization
+async function initializeAgent(character: Character): Promise<IAgentRuntime> {
+  const runtime = new AgentRuntime({
+    character,
+    databaseAdapter: new PGLiteDatabaseAdapter(),
+    // ... other configuration
+  });
+
+  try {
+    await runtime.initialize();
+    await runtime.start();
+    return runtime;
+  } catch (error) {
+    await runtime.stop(); // Cleanup on failure
+    throw error;
+  }
+}
+```
+
+### Resource Management
+
+```typescript
+// ✅ DO: Proper cleanup in async operations
+async function processWithRuntime(runtime: IAgentRuntime, message: Memory) {
+  try {
+    const result = await runtime.processMessage(message);
+    return result;
+  } finally {
+    // Ensure cleanup happens
+    await runtime.stop();
+  }
+}
+```
+
+### Event Handling
+
+```typescript
+// ✅ DO: Use events for component communication
+runtime.registerEvent('ACTION_COMPLETED', async (params) => {
+  // Handle action completion
+  await runtime.createMemory({
+    // Log the completion
+  });
+});
+```
+
+## Common Patterns
+
+### Message Processing
+
+```typescript
+// Standard message processing pattern
+async function handleIncomingMessage(runtime: IAgentRuntime, message: Memory) {
+  // 1. Ensure connections exist
+  await runtime.ensureConnections(
+    [{ id: message.entityId, name: 'User' }],
+    [{ id: message.roomId, name: 'Room' }],
+    'discord',
+    { id: message.worldId || runtime.agentId }
+  );
+
+  // 2. Compose state
+  const state = await runtime.composeState(message);
+
+  // 3. Process actions
+  await runtime.processActions(message, [], state);
+
+  // 4. Run evaluators
+  await runtime.evaluate(message, state);
+}
+```
+
+### Plugin Integration
+
+```typescript
+// Integrating plugins with runtime
+async function setupPlugin(runtime: IAgentRuntime, plugin: Plugin) {
+  // Register plugin
+  await runtime.registerPlugin(plugin);
+
+  // Verify components were registered
+  console.log(`Registered ${runtime.actions.length} actions`);
+  console.log(`Registered ${runtime.providers.length} providers`);
+}
+```
+
+## Error Handling
+
+### Runtime Errors
+
+```typescript
+// ✅ DO: Handle runtime errors appropriately
+try {
+  await runtime.initialize();
+} catch (error) {
+  if (error.message.includes('database')) {
+    // Handle database connection errors
+  } else if (error.message.includes('plugin')) {
+    // Handle plugin loading errors
+  } else {
+    // Handle general errors
+  }
+}
+```
+
+### Service Errors
+
+```typescript
+// ✅ DO: Handle service-related errors
+try {
+  const service = runtime.getService('critical-service');
+  if (!service) {
+    throw new Error('Critical service not available');
+  }
+} catch (error) {
+  // Handle service unavailability
+  await runtime.stop();
+}
+```
+
+## Performance Considerations
+
+### State Caching
+
+```typescript
+// The runtime automatically caches state by message ID
+// Avoid redundant state composition calls
+const state1 = await runtime.composeState(message); // Cached
+const state2 = await runtime.composeState(message); // Uses cache
+```
+
+### Memory Optimization
+
+```typescript
+// Use appropriate memory retrieval parameters
+const memories = await runtime.getMemories({
+  roomId: roomId,
+  count: 10,        // Limit results
+  start: Date.now() - 86400000 // Last 24 hours only
+});
+```
+
+### Connection Pooling
+
+```typescript
+// The runtime manages connection pooling automatically
+// Services should reuse connections when possible
+const service = runtime.getService<DatabaseService>('database');
+// Service handles connection pooling internally
+```
+
+## References
+
+- [AgentRuntime Source](mdc:packages/core/src/runtime.ts)
+- [IAgentRuntime Interface](mdc:packages/core/src/types/runtime.ts)
+- [Memory Management](mdc:packages/core/src/types/memory.ts)
+- [Database Adapters](mdc:packages/core/src/types/database.ts)
