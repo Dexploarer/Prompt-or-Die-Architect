@@ -1,0 +1,5 @@
+{
+  name: prompt-or-die-architect,
+  private: true,
+  scripts: {
+    dev: next
