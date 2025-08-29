@@ -22,19 +22,24 @@ Return JSON with shape: {
 `;
 
 export const PROJECT_PLAN_PROMPT = `
-You are a comprehensive project planner. Generate a detailed project plan with architecture, user stories, and file structure.
-Return JSON with shape: {
+You are a comprehensive project planner. Generate a PRODUCTION-READY project plan.
+Return JSON with keys:
+{
   "title": string,
   "description": string,
-  "architecture": {"nodes": [...], "edges": [...]},
+  "architecture": {
+    "nodes": [{ "id": string, "label": string, "kind": "service|db|queue|page|job|cache", "owner"?: string }],
+    "edges": [{ "id": string, "source": string, "target": string, "label"?: string }]
+  },
+  "userFlows": [{ "id": string, "name": string, "steps": string[] }],
   "userStories": [{"id": string, "title": string, "description": string, "acceptanceCriteria": string[], "priority": "High|Medium|Low", "estimate": "S|M|C", "assignees": string[]}],
-  "fileStructure": [{"name": string, "type": "file|directory", "content"?: string, "children"?: [...]}],
+  "fileStructure": [{"name": string, "type": "file|directory", "content"?: string, "children"?: [...] }],
   "techStack": {"frontend": string, "backend": string, "database": string, "deployment": string},
   "timeline": {"phases": [{"name": string, "duration": string, "tasks": string[]}]},
   "risks": string[],
   "considerations": string[]
 }
-`;
+Keep it concise but specific. JSON only.`;
 
 export const SCAFFOLD_GENERATION_PROMPT = `
 Generate actual code files for the specified tech stack and requirements.
@@ -44,6 +49,18 @@ Return JSON with shape: {
   "environment": {"variables": string[], "setup": string[]}
 }
 Include package.json, configuration files, basic components, and setup instructions.
+`;
+
+export const DOCS_PROMPT = `
+You are a senior product architect. Given a project plan JSON, generate a comprehensive Markdown document with:
+- Title and executive summary
+- Architecture overview (bullets of key services, data stores, queues)
+- User flows (end-to-end steps)
+- Top user stories (with acceptance criteria)
+- Non-functional requirements (security, scalability, observability)
+- Risks & mitigations
+- Release plan (phases)
+Use clear headings (##) and concise bullets. Output Markdown only.
 `;
 
 export async function generateStackRecommendation(requirements: string) {
@@ -79,6 +96,40 @@ export async function generateScaffold(plan: any, selectedStack: any) {
     messages: [
       { role: "system", content: SCAFFOLD_GENERATION_PROMPT },
       { role: "user", content: context }
+    ]
+  });
+  return JSON.parse(completion.choices[0].message.content ?? "{}");
+}
+
+export async function generateDocsFromPlan(plan: any) {
+  const completion = await client.chat.completions.create({
+    model: "gpt-4",
+    messages: [
+      { role: "system", content: DOCS_PROMPT },
+      { role: "user", content: JSON.stringify(plan) }
+    ]
+  });
+  return completion.choices[0].message.content || "";
+}
+
+export const ESTIMATE_PROMPT = `
+You are a delivery manager. Given a project plan JSON with userFlows and userStories,
+estimate time (in hours) and cost (USD) using a base rate of $70/hr.
+Return JSON with shape:
+{
+  "totals": { "hours": number, "cost": number },
+  "flows": [{ "id": string, "hours": number, "cost": number }],
+  "stories": [{ "id": string, "hours": number, "cost": number }]
+}
+Only JSON.`;
+
+export async function estimateCostTime(plan: any) {
+  const completion = await client.chat.completions.create({
+    model: "gpt-4",
+    response_format: { type: "json_object" },
+    messages: [
+      { role: "system", content: ESTIMATE_PROMPT },
+      { role: "user", content: JSON.stringify(plan) }
     ]
   });
   return JSON.parse(completion.choices[0].message.content ?? "{}");

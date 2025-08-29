@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import ReactFlow, {
   Background,
   Controls,
@@ -39,6 +39,8 @@ export default function Home() {
   const [rfEdges, setEdges, onEdgesChange] = useEdgesState<Edge[]>([]);
   const ref = useRef<HTMLDivElement>(null);
   const [busy, setBusy] = useState(false);
+  const [showGrid, setShowGrid] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const toRF = useCallback(async (g: Graph) => {
     const pos = await layout(g);
@@ -60,29 +62,43 @@ export default function Home() {
   }, [setNodes, setEdges]);
 
   async function fromText() {
-    setBusy(true);
-    const r = await fetch("/api/graph/from-text", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text: idea }),
-    });
-    const g = (await r.json()) as Graph;
-    await toRF(g);
-    setBusy(false);
+    try {
+      setError(null);
+      setBusy(true);
+      const r = await fetch("/api/graph/from-text", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: idea }),
+      });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const g = (await r.json()) as Graph;
+      await toRF(g);
+    } catch (e: any) {
+      setError(e?.message || "Failed to generate architecture");
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function suggest() {
-    setBusy(true);
-    const graph: Graph = {
-      nodes: rfNodes.map((n) => ({ id: n.id, label: (n.data as any).label, kind: (n.data as any).kind })),
-      edges: rfEdges.map((e) => ({ id: e.id, source: e.source, target: e.target, label: e.label })),
-    };
-    const r = await fetch("/api/graph/suggest", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ graph, goal }),
-    });
-    const g = (await r.json()) as Graph;
-    await toRF(g);
-    setBusy(false);
+    try {
+      setError(null);
+      setBusy(true);
+      const graph: Graph = {
+        nodes: rfNodes.map((n) => ({ id: n.id, label: (n.data as any).label, kind: (n.data as any).kind })),
+        edges: rfEdges.map((e) => ({ id: e.id, source: e.source, target: e.target, label: e.label })),
+      };
+      const r = await fetch("/api/graph/suggest", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ graph, goal }),
+      });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const g = (await r.json()) as Graph;
+      await toRF(g);
+    } catch (e: any) {
+      setError(e?.message || "Failed to suggest improvements");
+    } finally {
+      setBusy(false);
+    }
   }
 
   const onConnect = useCallback((c: Connection) => setEdges((eds) => addEdge({ ...c, animated: true }, eds)), [setEdges]);
@@ -93,6 +109,26 @@ export default function Home() {
     const a = document.createElement("a");
     a.href = dataUrl; a.download = "diagram.png"; a.click();
   }
+
+  async function exportSvg() {
+    if (!ref.current) return;
+    const svgData = await htmlToImage.toSvg(ref.current);
+    const a = document.createElement("a");
+    a.href = svgData; a.download = "diagram.svg"; a.click();
+  }
+
+  useEffect(() => {
+    function onDock(e: any) {
+      const action = e.detail?.type;
+      if (action === "generate-architecture") fromText();
+      else if (action === "suggest-improvements") suggest();
+      else if (action === "export-png") exportPng();
+      else if (action === "export-svg") exportSvg();
+      else if (action === "toggle-grid") setShowGrid((v) => !v);
+    }
+    window.addEventListener("tool-dock", onDock as any);
+    return () => window.removeEventListener("tool-dock", onDock as any);
+  }, [rfNodes, rfEdges, idea, goal]);
 
   return (
     <main className="min-h-screen bg-neutral-950 text-neutral-100 p-6">
@@ -157,7 +193,7 @@ export default function Home() {
               onConnect={onConnect}
               fitView
             >
-              <Background />
+              {showGrid && <Background />}
               <MiniMap />
               <Controls />
             </ReactFlow>

@@ -1,5 +1,48 @@
 {
-  name: prompt-or-die-architect,
-  private: true,
-  scripts: {
-    dev: next
+  "name": "prompt-or-die-architect",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start -p 3000",
+    "storybook": "storybook dev -p 6006",
+    "build-storybook": "storybook build",
+    "lint": "echo \"No linter configured yet\" && exit 0",
+    "format": "echo \"No formatter configured yet\" && exit 0",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@tldraw/tldraw": "^3.15.4",
+    "elkjs": "^0.9.0",
+    "framer-motion": "^11.2.10",
+    "html-to-image": "^1.11.11",
+    "lucide-react": "^0.468.0",
+    "next": "14.2.5",
+    "openai": "^4.55.3",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "reactflow": "^11.10.2",
+    "react-markdown": "^9.0.3",
+    "remark-gfm": "^4.0.0",
+    "uuid": "^9.0.1"
+  },
+  "devDependencies": {
+    "@storybook/addon-essentials": "^8.1.5",
+    "@storybook/nextjs": "^8.1.5",
+    "@tailwindcss/typography": "^0.5.16",
+    "@types/node": "^20.12.12",
+    "@types/react": "^18.2.66",
+    "@types/uuid": "^9.0.6",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.4.41",
+    "storybook": "^8.1.5",
+    "tailwindcss": "^3.4.10",
+    "typescript": "^5.5.4",
+    "zod": "^3.23.8"
+  },
+  "optionalDependencies": {
+    "@react-pdf/renderer": "^3.4.4"
+  }
+}

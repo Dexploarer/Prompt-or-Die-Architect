@@ -7,6 +7,7 @@ export function Navigation() {
   const pathname = usePathname();
   
   const links = [
+    { href: "/home", label: "Home", icon: "🏠" },
     { href: "/", label: "Architecture", icon: "🏗️" },
     { href: "/builder", label: "Stack Builder", icon: "⚙️" },
     { href: "/diagram", label: "Diagram", icon: "📊" },

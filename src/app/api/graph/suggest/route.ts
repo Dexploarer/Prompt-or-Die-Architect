@@ -1,8 +1,16 @@
 import { NextRequest } from "next/server";
 import { client, GRAPH_JSON_INSTRUCTIONS } from "@/lib/ai";
+import { GraphSchema } from "@/types/schemas";
 
 export async function POST(req: NextRequest) {
   const { graph, goal } = await req.json();
+  const parsed = GraphSchema.safeParse(graph);
+  if (!parsed.success) {
+    return new Response(JSON.stringify({ error: "Invalid graph payload", details: parsed.error.flatten() }), {
+      status: 400,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
 
   const messages = [
     { role: "system", content: GRAPH_JSON_INSTRUCTIONS },
