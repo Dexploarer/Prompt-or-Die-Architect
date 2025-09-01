@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useRef, useState } from "react";
+import React, { useCallback, useRef, useState, useEffect } from "react";
 import ReactFlow, {
   Background,
   Controls,
@@ -30,9 +30,67 @@ function GlassNode({ data }: { data: { label: string; kind: Kind } }) {
   );
 }
 
+const Cookbook = () => {
+  const [guides, setGuides] = useState<{ fileName: string; content: string }[]>([]);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [selectedGuide, setSelectedGuide] = useState<string | null>(null);
+
+  useEffect(() => {
+    async function fetchGuides() {
+      try {
+        const res = await fetch("/api/guides");
+        if (res.ok) {
+          const data = await res.json();
+          setGuides(data);
+        }
+      } catch (error) {
+        console.error("Failed to fetch guides", error);
+      }
+    }
+    fetchGuides();
+  }, []);
+
+  const filteredGuides = guides.filter(guide =>
+    guide.fileName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    guide.content.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
+  const guideContent = selectedGuide ? guides.find(g => g.fileName === selectedGuide)?.content : null;
+
+  return (
+    <div className="glass p-3 space-y-2">
+      <div className="text-sm font-semibold">Cookbook Guides</div>
+      <input
+        type="text"
+        placeholder="Search guides..."
+        value={searchTerm}
+        onChange={(e) => setSearchTerm(e.target.value)}
+        className="w-full glass p-2 outline-none"
+      />
+      <div className="max-h-40 overflow-y-auto">
+        {filteredGuides.map(guide => (
+          <div key={guide.fileName} className="p-2 glass my-1 cursor-pointer" onClick={() => setSelectedGuide(guide.fileName)}>
+            {guide.fileName}
+          </div>
+        ))}
+      </div>
+      {selectedGuide && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="glass p-4 rounded-lg max-w-3xl w-full max-h-[80vh] overflow-y-auto">
+            <h2 className="text-xl font-bold mb-4">{selectedGuide}</h2>
+            <pre className="whitespace-pre-wrap text-sm">{guideContent}</pre>
+            <button onClick={() => setSelectedGuide(null)} className="mt-4 glass p-2">Close</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
 const nodeTypes = { glass: GlassNode };
 
 export default function Home() {
+  const [diagramType, setDiagramType] = useState("System Architecture");
   const [idea, setIdea] = useState("An AI planning app that turns text into graphs and suggests architecture.");
   const [goal, setGoal] = useState("Make it multi-tenant, add audit log service, add cache.");
   const [docPrompt, setDocPrompt] = useState("Ride Share Application Plan");
@@ -66,7 +124,7 @@ export default function Home() {
     try {
       const r = await fetch("/api/graph/from-text", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: idea }),
+        body: JSON.stringify({ text: idea, diagramType }),
       });
       if (!r.ok) {
         throw new Error(`HTTP error! status: ${r.status}`);
@@ -221,12 +279,25 @@ export default function Home() {
         <section className="md:col-span-1 space-y-3">
           <AuthStatus />
           <h1 className="text-2xl font-bold">Glass AI Diagrams</h1>
+          <div className="glass p-3 space-y-2">
+            <label className="text-sm font-semibold">Diagram Type</label>
+            <select
+              value={diagramType}
+              onChange={(e) => setDiagramType(e.target.value)}
+              className="w-full glass p-2 outline-none"
+            >
+              <option>System Architecture</option>
+              <option>User Flow</option>
+              <option>Sequence Diagram</option>
+            </select>
+          </div>
           <textarea value={idea} onChange={(e) => setIdea(e.target.value)}
             className="w-full h-28 glass p-3 outline-none" placeholder="Paste idea or spec..." />
           <button onClick={fromText} disabled={busy} className="w-full glass p-3">Generate from text</button>
           <textarea value={goal} onChange={(e) => setGoal(e.target.value)}
             className="w-full h-24 glass p-3 outline-none" placeholder="Goal or constraint for suggestions..." />
           <button onClick={suggest} disabled={busy} className="w-full glass p-3">Suggest improvements</button>
+          <Cookbook />
           <div className="grid grid-cols-3 gap-2">
             <button onClick={exportPng} className="w-full glass p-3">Export PNG</button>
             <button onClick={saveData} disabled={busy} className="w-full glass p-3">Save</button>
@@ -268,5 +339,3 @@ export default function Home() {
     </main>
   );
 }
-
-

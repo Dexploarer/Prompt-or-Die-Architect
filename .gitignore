@@ -1,2 +1,4 @@
 node_modules
 /data
+.next/
+npm_output.log
