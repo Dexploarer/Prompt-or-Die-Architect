@@ -34,6 +34,7 @@ const nodeTypes = { glass: GlassNode };
 
 export default function Home() {
   const [idea, setIdea] = useState("An AI planning app that turns text into graphs and suggests architecture.");
+  const [diagramType, setDiagramType] = useState<"system" | "user-flow">("system");
   const [goal, setGoal] = useState("Make it multi-tenant, add audit log service, add cache.");
   const [docPrompt, setDocPrompt] = useState("Ride Share Application Plan");
   const [docJson, setDocJson] = useState<string>("");
@@ -66,7 +67,7 @@ export default function Home() {
     try {
       const r = await fetch("/api/graph/from-text", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: idea }),
+        body: JSON.stringify({ text: idea, type: diagramType }),
       });
       if (!r.ok) {
         throw new Error(`HTTP error! status: ${r.status}`);
@@ -221,6 +222,14 @@ export default function Home() {
         <section className="md:col-span-1 space-y-3">
           <AuthStatus />
           <h1 className="text-2xl font-bold">Glass AI Diagrams</h1>
+          <div className="glass p-3 space-y-2">
+            <label htmlFor="diagram-type" className="text-sm font-semibold">Diagram Type</label>
+            <select id="diagram-type" value={diagramType} onChange={(e) => setDiagramType(e.target.value as any)}
+              className="w-full glass p-2 outline-none">
+              <option value="system">System Architecture</option>
+              <option value="user-flow">User Flow</option>
+            </select>
+          </div>
           <textarea value={idea} onChange={(e) => setIdea(e.target.value)}
             className="w-full h-28 glass p-3 outline-none" placeholder="Paste idea or spec..." />
           <button onClick={fromText} disabled={busy} className="w-full glass p-3">Generate from text</button>
