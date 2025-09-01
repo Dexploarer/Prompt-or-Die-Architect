@@ -53,15 +53,26 @@ function PlanPDF({ doc }: { doc: any }) {
 }
 
 export async function POST(req: NextRequest) {
-  const { json } = await req.json();
-  const doc = JSON.parse(json || "{}");
-  const pdfStream = await renderToStream(<PlanPDF doc={doc} />);
-  return new Response(pdfStream as any, {
-    headers: {
-      "Content-Type": "application/pdf",
-      "Content-Disposition": "attachment; filename=plan.pdf",
-    },
-  });
+  try {
+    const { plan } = await req.json();
+    if (!plan) {
+      return new Response(JSON.stringify({ error: "Missing 'plan'" }), { status: 400 });
+    }
+    const pdfStream = await renderToStream(<PlanPDF doc={plan} />);
+    return new Response(pdfStream as any, {
+      status: 200,
+      headers: {
+        "Content-Type": "application/pdf",
+        "Content-Disposition": `attachment; filename="${encodeURI(
+          ((plan?.title) || 'plan').replace(/\s+/g, '-').toLowerCase()
+        )}.pdf"`,
+      },
+    });
+  } catch (e: any) {
+    console.error(e);
+    return new Response(JSON.stringify({ error: "PDF generation failed" }), {
+      status: 500,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
 }
-
-
